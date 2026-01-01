@@ -22,10 +22,20 @@ async function assembleScript(projectId, modulesData, niche = 'documentary', tar
     // Sort modules by index
     const sortedModules = [...modules].sort((a, b) => a.module_index - b.module_index);
 
+    // --- GAP CHECK: Ensure no modules are missing in sequence ---
+    for (let i = 0; i < sortedModules.length; i++) {
+        const expectedIndex = i + 1;
+        if (sortedModules[i].module_index !== expectedIndex) {
+            log.error(`❌ [Assembler] Phát hiện thiếu Module tại Index ${expectedIndex}. Sequence: ${sortedModules.map(m => m.module_index).join(',')}`);
+            throw new Error(`Kịch bản không liên tục: Thiếu Module ${expectedIndex}. Vui lòng chạy lại Planner.`);
+        }
+    }
+
     // --- STEP 5.1: MODULE ORDER & EMOTIONAL FLOW CHECK (DATA-DRIVEN) ---
     const validation = validateEmotionalFlow(sortedModules, nicheProfile);
     if (!validation.pass) {
-        log.warn(`⚠️ Emotional Flow Check: ${validation.issues.join("; ")}`);
+        const issuesText = Array.isArray(validation.issues) ? validation.issues.join("; ") : "Lỗi luồng cảm xúc không xác định";
+        log.warn(`⚠️ Emotional Flow Check: ${issuesText}`);
     }
 
     // --- STEP 5.2: MERGE MODULES & HOOK PROTECTION ---
@@ -229,7 +239,8 @@ function checkReadability(text, profile) {
         const empathyWords = ["healing", "deserve", "journey", "motivation", "self-love", "believe"];
         const foundEmpathy = empathyWords.filter(w => text.toLowerCase().includes(w));
         if (foundEmpathy.length > 0) {
-            issues.push(`DE_FLOW_ALERT: Over-empathy detected! Forbidden emotional words found: [${foundEmpathy.join(", ")}]. This script feels too "American".`);
+            const empathyText = Array.isArray(foundEmpathy) ? foundEmpathy.join(", ") : "N/A";
+            issues.push(`DE_FLOW_ALERT: Over-empathy detected! Forbidden emotional words found: [${empathyText}]. This script feels too "American".`);
         }
 
         // Logical density check (simple sentence count vs total length)

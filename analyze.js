@@ -252,8 +252,8 @@ async function runDownstreamPipeline(projectId, finalResult, niche, targetLangua
                 finalResult = { ...finalResult, ...planData };
             }
 
-            const checkpointResult = await checkpointEngine.evaluatePlan(projectId, finalResult, niche, outputDir);
-            if (checkpointResult.ready) {
+            const checkpointResult = await checkpointEngine.evaluatePlan(projectId, finalResult, niche, outputDir, word_count);
+            if (checkpointResult && checkpointResult.ready) {
                 checkpointPassed = true;
             } else {
                 checkpointFeedback = checkpointResult;
@@ -289,7 +289,7 @@ async function runDownstreamPipeline(projectId, finalResult, niche, targetLangua
 const { parseAIJSON } = require('./json_helper');
 function parseAIResponse(text) {
     const results = parseAIJSON(text, "Analysis");
-    if (!results || results.length === 0) return null;
+    if (!results) return null;
     return results.length === 1 ? results[0] : results;
 }
 

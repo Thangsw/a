@@ -47,13 +47,15 @@ async function processAllModules(projectId, fullData, niche = 'self_help', targe
                 // 2. Tool-based QA Check
                 const qaResult = qaCheck(moduleScript, module, allowedKeywords, nicheProfile);
                 if (!qaResult.pass) {
-                    throw new Error(`QA thất bại: ${qaResult.issues.join(", ")}`);
+                    const issuesText = Array.isArray(qaResult.issues) ? qaResult.issues.join(", ") : "Lỗi QA không xác định";
+                    throw new Error(`QA thất bại: ${issuesText}`);
                 }
 
                 // 3. AI Self-Check (Optional but recommended)
                 const evalResult = await evaluateModule(projectId, moduleScript, module, niche);
                 if (!evalResult.pass) {
-                    throw new Error(`AI thẩm định thất bại: ${evalResult.issues.join(", ")}`);
+                    const issuesText = Array.isArray(evalResult.issues) ? evalResult.issues.join(", ") : "Lỗi Thẩm định không xác định";
+                    throw new Error(`AI thẩm định thất bại: ${issuesText}`);
                 }
 
                 success = true;
@@ -171,11 +173,11 @@ function qaCheck(moduleScript, moduleData, allowedKeywords, profile) {
     const content = moduleScript.content || "";
     const wordCount = content.split(/\s+/).filter(w => w.length > 0).length;
 
-    // 1. Check Word Count (±5%)
-    const minWords = moduleData.word_target * 0.95;
-    const maxWords = moduleData.word_target * 1.05;
+    // 1. Check Word Count (±15% to align with Prompt)
+    const minWords = moduleData.word_target * 0.85;
+    const maxWords = moduleData.word_target * 1.15;
     if (wordCount < minWords || wordCount > maxWords) {
-        issues.push(`Word count mismatch: ${wordCount} words (Target: ${moduleData.word_target})`);
+        issues.push(`Word count mismatch: ${wordCount} words (Target: ${moduleData.word_target}, Allowed: ${Math.round(minWords)}-${Math.round(maxWords)})`);
     }
 
     // 2. Check Keyword Usage
@@ -265,7 +267,7 @@ OUTPUT JSON ONLY:
 }
 
 async function executeAIScript(projectId, prompt, actionName) {
-    const MODEL_PRIORITY = ['gemma-3-27b-it', 'gemma-3-12b-it', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it', 'gemma-3-12b-it'];
     let lastError = null;
 
     for (const modelName of MODEL_PRIORITY) {

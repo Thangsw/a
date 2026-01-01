@@ -1,90 +1,77 @@
 function parseAIJSON(text, context = "Unknown") {
-    if (!text) return [];
+    if (!text) return null;
     try {
         // 1. Basic Cleaning
         let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
         clean = clean.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "");
 
-        // 2. Try Standard Parse first (Fast path with aggressive cropping)
+        // 1.5 SELF-HEAL: Attempt to fix truncated JSON (common in AI responses)
+        if (clean.includes('{') && !clean.includes('}')) {
+            console.warn(`⚠️ [JSON Parser][${context}] Truncated object detected. Attempting to fix...`);
+            clean += '"}'; // Minimal fix for string/object closure
+        }
+        if (clean.startsWith('[') && !clean.endsWith(']')) {
+            console.warn(`⚠️ [JSON Parser][${context}] Truncated array detected. Attempting to fix...`);
+            clean += '}]';
+        }
+
+        // 2. Try Standard Parse first
         try {
+            const parsed = JSON.parse(clean);
+            if (Array.isArray(parsed)) return parsed.length > 0 ? parsed : null;
+            if (typeof parsed === 'object' && parsed !== null) return [parsed];
+        } catch (eInitial) {
+            // Extraction logic
             let jsonStart = clean.indexOf('[');
             let jsonEnd = clean.lastIndexOf(']');
 
-            // If no array, try object
             if (jsonStart === -1) {
                 jsonStart = clean.indexOf('{');
                 jsonEnd = clean.lastIndexOf('}');
             }
 
-            if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-                const potentialJson = clean.substring(jsonStart, jsonEnd + 1);
-                const parsed = JSON.parse(potentialJson);
-                if (Array.isArray(parsed)) return parsed;
-                if (typeof parsed === 'object') return [parsed];
-            }
-        } catch (eQuick) {
-            // Fall through to regex if quick parse fails
-        }
-
-        try {
-            const parsed = JSON.parse(clean);
-            if (Array.isArray(parsed)) return parsed;
-            if (typeof parsed === 'object') return [parsed];
-        } catch (eInitial) {
-            console.warn(`⚠️ [JSON Parser][${context}] Normal parse failed, trying Regex Extraction...`);
-
-            const results = [];
-
-            // 3. REGEX IMMORTAL v2 (Flexible key order and value types)
-            // Pattern to find objects containing "id" and ("p" or "image_prompt")
-            // This regex finds the whole object block {...} then we'll extract from it
-            const blockRegex = /\{[^{}]*"(?:image_prompt|p)"[^{}]*\}/gs;
-            const blocks = clean.match(blockRegex) || [];
-
-            for (const block of blocks) {
+            if (jsonStart !== -1 && (jsonEnd === -1 || jsonEnd < jsonStart)) {
+                // Heuristic: Close the JSON if it looks truncated
+                console.warn(`⚠️ [JSON Parser][${context}] Bad boundaries. Closing JSON manually.`);
+                const sub = clean.substring(jsonStart) + (clean.startsWith('[') ? '"}]' : '"}');
                 try {
-                    // Try to extract ID (string or number)
-                    const idMatch = block.match(/"id"\s*:\s*"?(\d+)"?/);
-                    // Try to extract Prompt (p or image_prompt)
-                    const pMatch = block.match(/"(?:image_prompt|p)"\s*:\s*"((?:\\.|[^"\\])*)"/);
-
-                    if (pMatch) {
-                        results.push({
-                            id: idMatch ? parseInt(idMatch[1]) : results.length + 1,
-                            p: pMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n')
-                        });
-                    }
-                } catch (e) { /* skip bad blocks */ }
+                    const parsed = JSON.parse(sub);
+                    return Array.isArray(parsed) ? (parsed.length > 0 ? parsed : null) : [parsed];
+                } catch (e) { }
             }
 
-            if (results.length > 0) {
-                console.log(`✅ [JSON Parser][${context}] Extracted ${results.length} items via block-regex.`);
-                return results;
+            if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
+                try {
+                    const potentialJson = clean.substring(jsonStart, jsonEnd + 1);
+                    const parsed = JSON.parse(potentialJson);
+                    if (Array.isArray(parsed)) return parsed.length > 0 ? parsed : null;
+                    if (typeof parsed === 'object') return [parsed];
+                } catch (eSub) { }
             }
-
-            // 4. Raw Prompt Scan (Last resort)
-            const promptPattern = /"(?:image_prompt|p|video_prompt)"\s*:\s*"((?:\\.|[^"\\])*)"/g;
-            let pMatch;
-            let fallbackId = 1;
-            while ((pMatch = promptPattern.exec(clean)) !== null) {
-                results.push({
-                    id: fallbackId++,
-                    p: pMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n')
-                });
-            }
-
-            if (results.length > 0) {
-                console.log(`✅ [JSON Parser][${context}] Salvaged ${results.length} prompts via raw scan.`);
-                return results;
-            }
-
-            console.error(`❌ [JSON Parser][${context}] All salvage methods failed.`);
-            console.error(`🔍 [Debug][Raw Start]: ${clean.substring(0, 200)}...`);
-            return [];
         }
+
+        // 3. REGEX SALVAGE (Final fallback)
+        const results = [];
+        const promptPattern = /"(?:image_prompt|p|video_prompt|content|cliffhanger)"\s*:\s*"((?:\\.|[^"\\])*)"/g;
+        let pMatch;
+        let fallbackId = 1;
+        while ((pMatch = promptPattern.exec(clean)) !== null) {
+            results.push({
+                id: fallbackId++,
+                p: pMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n'),
+                content: pMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n')
+            });
+        }
+
+        if (results.length > 0) {
+            console.log(`✅ [JSON Parser][${context}] Salvaged ${results.length} items via regex.`);
+            return results;
+        }
+
+        return null; // Ensure null on failure to trigger proper catch blocks
     } catch (e) {
-        console.error(`❌ [JSON Parser][${context}] Critical Error in Parser:`, e);
-        return [];
+        console.error(`❌ [JSON Parser][${context}] Critical Error:`, e.message);
+        return null;
     }
 }
 

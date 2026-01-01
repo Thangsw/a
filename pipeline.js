@@ -18,6 +18,7 @@ const profileManager = require('./profiles');
 const promptEngine = require('./promptEngine');
 const nicheManager = require('./nicheManager');
 const { parseAIJSON } = require('./json_helper');
+const { log } = require('./colors');
 
 function sendMessage(event, data) {
     if (global.sendSSE) global.sendSSE(event, data);
@@ -283,7 +284,7 @@ async function runFullPipeline(req, res) {
 }
 
 async function executeAI(projectId, prompt, actionName) {
-    const MODEL_PRIORITY = ['gemma-3-27b-it', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it', 'gemma-3-12b-it'];
     let lastError = null;
     for (const modelName of MODEL_PRIORITY) {
         try {
@@ -304,8 +305,13 @@ async function executeAI(projectId, prompt, actionName) {
         } catch (err) {
             lastError = err;
             const errMsg = err.message.toLowerCase();
-            if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('503') || errMsg.includes('overloaded') || errMsg.includes('exhausted')) {
-                log.warn(`⚠️ Model ${modelName} thất bại. Đang thử model tiếp theo...`);
+            const isRetryable = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('503') ||
+                errMsg.includes('overloaded') || errMsg.includes('exhausted') ||
+                errMsg.includes('econnreset') || errMsg.includes('etimedout') ||
+                errMsg.includes('socket') || errMsg.includes('network');
+
+            if (isRetryable) {
+                log.warn(`⚠️ Model ${modelName} gặp lỗi tạm thời: ${err.message}. Đang thử lại hoặc model tiếp theo...`);
                 continue;
             }
             throw err;

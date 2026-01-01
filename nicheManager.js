@@ -31,7 +31,7 @@ const NICHE_PROFILES = {
         forbidden_phrases: [],
         emotional_arc: ["hook", "rising_action", "peak", "resolution", "open_loop"],
         emotional_requirements: { narrative_tension: true },
-        polish_prompt: "You are a senior documentary editor. Polish only the BODY of this script. Maintain narrative tension and immersive flow. Smooth out transitions to maintain 20+ min engagement.",
+        polish_prompt: "You are a senior documentary editor. Polish only the BODY of this script. Maintain narrative tension and immersive flow. Smooth out transitions to maintain long-form engagement.",
         ctr_config: {
             strategy: "narrative_mystery",
             title_rules: {
