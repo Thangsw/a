@@ -1,27 +1,38 @@
 # 📋 BÁO CÁO KIỂM THỬ HỆ THỐNG (QA BUG REPORT) - CẬP NHẬT
-**Ngày kiểm tra:** 01/01/2026 (Cập nhật lần cuối: 02/01/2026 02:40)
+**Ngày kiểm tra:** 01/01/2026 (Cập nhật lần cuối: 02/01/2026 03:15)
 **Người kiểm thử:** QA Tester (Claude Code)
 **Hệ thống:** 11estAuto Video Generator - SHU Content Engine
-**Phiên bản:** v1.1 (git branch: claude/test-review-bugs-b8vw3)
-**Commit:** ef4f503 (Merge PR #1 - Bug fixes)
+**Phiên bản:** v1.2 (git branch: claude/test-review-bugs-b8vw3)
+**Commit:** 62c83a0 (QA Report v1.1) + Runtime Error Analysis
+
+---
+
+## 🚨 CẢNH BÁO: PHÁT HIỆN 3 CRITICAL BUGS MỚI TỪ RUNTIME ERRORS
+
+**Source:** Screenshot analysis - Lỗi thực tế từ production logs
+**Severity:** 🔴🔴🔴 CRITICAL - Đang gây crash hệ thống
 
 ---
 
 ## 🎯 TÓM TẮT TỔNG QUAN
 
-### ✅ TIẾN TRIỂN TỐT!
+### ⚠️ CẬP NHẬT NGHIÊM TRỌNG!
 
-Sau khi kiểm tra lại code sau Pull Request #1, **4/11 bugs nghiêm trọng đã được fix**! Hệ thống đã cải thiện đáng kể về độ ổn định và error handling.
+Sau khi phân tích runtime errors từ screenshot, phát hiện **3 CRITICAL bugs mới** chưa được fix! Các bugs này đang **gây crash hệ thống thực tế**.
 
 ### Tình trạng bugs:
 - ✅ **FIXED:** 4 bugs (3 Critical, 1 High)
 - ⚠️ **PARTIAL FIX:** 2 bugs (1 High, 1 Medium)
 - ⏳ **PENDING:** 5 bugs
-- 🆕 **NEW ISSUES:** 2 vấn đề nhỏ phát hiện từ fixes
+- 🔴 **NEW CRITICAL:** 3 bugs (từ runtime errors)
+- 🆕 **NEW MINOR:** 2 vấn đề nhỏ phát hiện từ code review
+
+**TOTAL BUGS: 16** (tăng từ 13)
 
 ### Điểm số tổng thể:
 - **Trước khi fix:** 6.5/10
-- **Sau khi fix:** **7.8/10** ⬆️ (+1.3 điểm)
+- **Sau PR#1:** 7.8/10
+- **Sau phát hiện runtime errors:** **7.2/10** ⬇️ (-0.6 điểm)
 
 ---
 
@@ -259,6 +270,186 @@ if (evalResult && !evalResult.pass) {
 
 ---
 
+## 🔴🔴🔴 CRITICAL BUGS MỚI TỪ RUNTIME ERRORS (SCREENSHOT)
+
+### 🔴 NEW CRITICAL #1: Substring error khi moduleScript.content undefined
+**File:** `scriptGenerator.js:92`
+**Mức độ:** 🔴 CRITICAL
+**Error message từ screenshot:**
+> "Cannot read properties of undefined (reading 'substring'). Tôi đang fix và soát lại 'scriptGenerator.js'"
+
+**Mô tả:**
+```javascript
+// Line 92 - scriptGenerator.js
+previousSummary = moduleScript.content.substring(0, 300) + "...";
+```
+
+Nếu `moduleScript.content` là `undefined`, `null`, hoặc không tồn tại, code sẽ crash với error:
+```
+TypeError: Cannot read properties of undefined (reading 'substring')
+```
+
+**Root cause:**
+- Khi AI generate module fail hoặc return empty content
+- `moduleScript.content` có thể undefined
+- Code không check null trước khi gọi `.substring()`
+
+**Reproduction steps:**
+1. AI response không có field `content`
+2. parseAIJSON returns object nhưng thiếu property `content`
+3. Line 92 cố access `undefined.substring()` → crash
+
+**Ảnh hưởng:**
+- 🔴 CRITICAL: Crash toàn bộ module generation pipeline
+- User không nhận được error message rõ ràng
+- previousSummary không được update, affecting next modules
+- Có thể gây domino effect cho các modules tiếp theo
+
+**Fix đề xuất:**
+```javascript
+// Safe version with null check
+if (moduleScript && moduleScript.content) {
+    previousSummary = moduleScript.content.substring(0, Math.min(300, moduleScript.content.length)) + "...";
+} else {
+    previousSummary = `Module ${module.index} completed (no content summary available)`;
+    log.warn(`⚠️ Module ${module.index} has no content for summary generation`);
+}
+```
+
+**Priority:** 🔴 URGENT - Fix immediately!
+
+---
+
+### 🔴 NEW CRITICAL #2: parseAIJSON returns array but caller expects object
+**File:** `scriptGenerator.js:287-294`
+**Mức độ:** 🔴 CRITICAL
+**Error message từ screenshot:**
+> "Sửa lỗi kỹ thuật và Đồng bộ hóa Parser (V5) - đang sửa đổi 'scriptGenerator.js' và 'checkpointEngine.js' để tương thích với cấu trúc mảng của Parser"
+
+**Mô tả:**
+```javascript
+// Line 287-294 - scriptGenerator.js (executeAIScript function)
+const json = parseAIJSON(text, "SCRIPT_GEN");
+
+if (json) {
+    if (projectId) {
+        const tokens = response.usageMetadata ? response.usageMetadata.totalTokenCount : 0;
+        await db.logAIAction(projectId, actionName, modelName, tokens, text);
+    }
+    return json;  // ⚠️ BUG: json could be an ARRAY!
+}
+```
+
+**Vấn đề:**
+parseAIJSON có thể trả về:
+- `null` - khi fail
+- `[object]` - khi parse thành công (wrapped in array theo json_helper.js:22)
+- `object` - trong một số cases
+
+Nhưng caller (line 45 in processAllModules) expects:
+```javascript
+moduleScript = await generateModule(...);
+// Later uses: moduleScript.content, moduleScript.cliffhanger
+```
+
+Nếu `json` là array `[{content: "...", cliffhanger: "..."}]`, thì:
+- `json.content` = undefined (vì array không có property content)
+- Gây ra lỗi ở line 49: `qaResult = qaCheck(moduleScript, ...)` vì moduleScript.content = undefined
+
+**Root cause:**
+- json_helper.js:22 wraps objects in array: `return [parsed]`
+- scriptGenerator.js:294 returns the array directly
+- Caller expects object, not array
+
+**Reproduction:**
+1. AI returns valid JSON object: `{"module_index": 1, "content": "...", "cliffhanger": "..."}`
+2. parseAIJSON wraps it: `[{"module_index": 1, ...}]`
+3. Line 294 returns the array
+4. Line 49 tries `qaCheck(array, ...)` expecting `array.content` → undefined
+5. Line 92 tries `array.content.substring()` → crash!
+
+**Ảnh hưởng:**
+- 🔴 CRITICAL: Mọi module generation sẽ fail
+- Cascade errors trong QA check
+- Word count always 0 (vì content = undefined)
+- "0 words" error như trong screenshot
+
+**Fix đề xuất:**
+```javascript
+// Line 287-296 - Fixed version
+const rawJson = parseAIJSON(text, "SCRIPT_GEN");
+
+if (!rawJson) {
+    throw new Error("Phản hồi AI không hợp lệ hoặc rỗng");
+}
+
+// Unwrap array if needed
+const json = Array.isArray(rawJson) ? rawJson[0] : rawJson;
+
+if (!json || typeof json !== 'object') {
+    throw new Error("Phản hồi AI không có dữ liệu hợp lệ");
+}
+
+// Validate required fields
+if (!json.hasOwnProperty('content') || !json.hasOwnProperty('cliffhanger')) {
+    throw new Error(`Phản hồi AI thiếu fields bắt buộc. Received: ${Object.keys(json).join(', ')}`);
+}
+
+if (projectId) {
+    const tokens = response.usageMetadata ? response.usageMetadata.totalTokenCount : 0;
+    await db.logAIAction(projectId, actionName, modelName, tokens, text);
+}
+
+return json;  // Now guaranteed to be an object with required fields
+```
+
+**Priority:** 🔴🔴 CRITICAL - Blocking all module generation!
+
+---
+
+### 🔴 NEW CRITICAL #3: Word count mismatch causing "0 words" error
+**File:** `scriptGenerator.js:172`
+**Mức độ:** 🔴 CRITICAL
+**Error message từ screenshot:**
+> "Module 2 - Lượt thử 1 thất bại: QA thất bại! Word count mismatch: 188 words (Target: 330, Allowed: 281-379)"
+
+**Mô tả:**
+Đây là kết quả của NEW CRITICAL #2. Khi `moduleScript` là array thay vì object:
+
+```javascript
+// Line 171-172
+const content = moduleScript.content || "";  // ← array.content = undefined, so content = ""
+const wordCount = content.split(/\s+/).filter(w => w.length > 0).length;  // wordCount = 0
+```
+
+**Chain of failures:**
+1. parseAIJSON returns array `[{content: "...", cliffhanger: "..."}]`
+2. executeAIScript returns array
+3. generateModule returns array
+4. qaCheck receives array as moduleScript
+5. `array.content` = undefined
+6. `content = ""` (from `|| ""` fallback)
+7. `wordCount = 0`
+8. QA check fails: "0 words (Target: 500, Allowed: 425-575)"
+
+**Observed in screenshot:**
+- Module 1, 2, 3 showing word count mismatches
+- "188 words" suggests content WAS generated but structure wrong
+- Parser synchronization issues mentioned
+
+**Ảnh hưởng:**
+- 🔴 CRITICAL: All modules fail QA check
+- Pipeline retries uselessly (wastes API tokens)
+- Eventually gives up after 2 attempts
+- No modules successfully generated
+
+**Fix:**
+Same as NEW CRITICAL #2 - fix the array unwrapping issue.
+
+**Priority:** 🔴 CRITICAL - Part of NEW CRITICAL #2
+
+---
+
 ## ⏳ CÁC BUGS VẪN CHỜ FIX
 
 ### BUG #2: Pipeline executeAI không validate parseAIJSON result properly
@@ -358,6 +549,9 @@ try {
 | #11 | 🟡 MEDIUM | ⚠️ ISSUE | ⏳ PENDING | parseAIResponse types | - |
 | NEW #1 | 🟡 MINOR | - | 🆕 NEW | json_helper logic | json_helper.js:36 |
 | NEW #2 | 🟡 MINOR | - | 🆕 NEW | evalResult null check | scriptGenerator.js:56 |
+| **NEW CRIT #1** | **🔴 CRITICAL** | - | **🚨 ACTIVE** | **substring crash** | **scriptGenerator.js:92** |
+| **NEW CRIT #2** | **🔴 CRITICAL** | - | **🚨 ACTIVE** | **Array/Object type mismatch** | **scriptGenerator.js:287-294** |
+| **NEW CRIT #3** | **🔴 CRITICAL** | - | **🚨 ACTIVE** | **0 words from type mismatch** | **scriptGenerator.js:172** |
 
 ---
 
@@ -494,12 +688,13 @@ Sau Pull Request #1, hệ thống đã được cải thiện **đáng kể**. 4
 ## 📞 SUPPORT & FEEDBACK
 
 **Prepared by:** QA Testing Team
-**Date:** January 2, 2026 02:40
-**Next Review:** After Phase 1 completion (estimated: Jan 4, 2026)
+**Date:** January 2, 2026 03:15
+**Next Review:** URGENT - Immediate action required for 3 CRITICAL bugs
 **Contact:** QA Team Lead
 
 ---
 
 ### Changelog:
 - **v1.0 (Jan 1, 2026):** Initial QA report with 11 bugs identified
-- **v1.1 (Jan 2, 2026):** Updated after PR #1 - 4 bugs fixed, 2 new issues found
+- **v1.1 (Jan 2, 2026 02:40):** Updated after PR #1 - 4 bugs fixed, 2 new minor issues found
+- **v1.2 (Jan 2, 2026 03:15):** 🚨 CRITICAL UPDATE - Added 3 CRITICAL bugs from runtime error analysis (screenshot). Total bugs: 16. Score downgraded: 7.8 → 7.2. URGENT fixes required for scriptGenerator.js parseAIJSON array/object mismatch causing module generation failures.
