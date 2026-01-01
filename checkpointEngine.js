@@ -10,15 +10,15 @@ const exportEngine = require('./exportEngine');
  * SHU Step 3.5: Checkpoint Engine (Content Director)
  */
 
-async function evaluatePlan(projectId, fullData, niche = 'self_help', outputDir = 'output') {
-    log.info(`🔒 [Checkpoint] Đang thẩm định kế hoạch cho Dự án: ${projectId} (Ngách: ${niche})...`);
+async function evaluatePlan(projectId, fullData, niche = 'self_help', outputDir = 'output', targetWords = 5000) {
+    log.info(`🔒 [Checkpoint] Đang thẩm định kế hoạch cho Dự án: ${projectId} (Ngách: ${niche}, Mục tiêu: ${targetWords} từ)...`);
     const nicheProfile = nicheManager.getProfile(niche);
 
     const prompt = `
 You are a senior ${nicheProfile.writer_role} content director.
 
 TASK:
-Evaluate whether the following plan (Keywords + Module Structure) is ready for full ${niche} video generation (4,000–6,000 words).
+Evaluate whether the following plan (Keywords + Module Structure) is ready for full ${niche} video generation (${targetWords} words, approx. ${Math.round(targetWords / 150)}+ minutes).
 
 INPUT DATA:
 - Hook Score: ${fullData.hook_score}
@@ -54,6 +54,11 @@ OUTPUT FORMAT (JSON ONLY):
     try {
         const evaluation = await executeAICheckpoint(projectId, prompt, outputDir);
 
+        if (!evaluation) {
+            log.error("❌ [Checkpoint] AI không trả về phản hồi hợp lệ.");
+            return { ready: false, recommendation: "replan_modules", issues: ["Phản hồi AI trống hoặc không thể giải mã"], feedback: "Hãy thử chạy lại hoặc kiểm tra API Key." };
+        }
+
         if (evaluation.ready) {
             log.success(`✅ [Checkpoint] Kế hoạch ĐÃ ĐƯỢC PHÊ DUYỆT để tạo kịch bản.`);
         } else {
@@ -71,7 +76,7 @@ OUTPUT FORMAT (JSON ONLY):
 }
 
 async function executeAICheckpoint(projectId, prompt, outputDir) {
-    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it'];
+    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it', 'gemma-3-12b-it'];
     let lastError = null;
 
     for (const modelName of MODEL_PRIORITY) {
