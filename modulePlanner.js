@@ -9,10 +9,17 @@ const nicheManager = require('./nicheManager');
  * SHU Step 3: Module Planning Engine
  */
 
-async function planModules(projectId, analyzedData, feedback = null, niche = 'self_help', targetWords = 5000) {
+async function planModules(projectId, analyzedData, feedback = null, niche = 'dark_psychology_de', targetWords = null) {
+    const nicheProfile = nicheManager.getProfile(niche);
+
+    // Auto-detect targetWords if missing
+    if (!targetWords) {
+        targetWords = nicheProfile.pipeline_settings?.target_words_per_block || 1500;
+        if (niche === 'dark_psychology_de') targetWords = 4500; // Total for 3 units
+    }
+
     log.info(`🧠 [SHU Bước 3] Đang lập kế hoạch module cho Dự án: ${projectId} (Ngách: ${niche}, Mục tiêu: ${targetWords} từ)${feedback ? " (Đang tinh chỉnh dựa trên phản hồi)" : ""}`);
 
-    const nicheProfile = nicheManager.getProfile(niche);
     const validRoles = nicheManager.getRoles(niche);
 
     const prompt = `
@@ -46,7 +53,7 @@ RULES:
 - Total modules must be between 8 and 10
 - Each module must have a clear narrative role
 - Structure must escalate tension gradually (Single-Peak approach)
-- IMPORTANT: You MUST choose exactly ONE role from the peak role list (PEAK, REALIZATION, TURNING_POINT, SHIFT) to serve as the narrative climax. Do NOT use more than one peak role in your plan.
+- IMPORTANT: You MUST choose exactly ONE role from the peak role list (PEAK, REALIZATION, TURNING_POINT, SHIFT, COLD_RESOLUTION) to serve as the narrative climax. Do NOT use more than one peak role in your plan.
 - Final module must leave an open loop (no conclusion)
 
 AVAILABLE MODULE ROLES:
@@ -99,18 +106,20 @@ OUTPUT FORMAT (JSON ONLY):
                     case "REALIZATION":
                     case "TURNING_POINT":
                     case "SHIFT":
-                        word_target = Math.round((650 + wordBias) * scaleFactor);
+                    case "COLD_RESOLUTION":
+                        word_target = Math.round((650 + wordBias) * (targetWords / 5000));
                         if (analyzedData.hook_score < 7) {
-                            word_target = Math.round((500 + wordBias) * scaleFactor);
+                            word_target = Math.round((500 + wordBias) * (targetWords / 5000));
                         }
                         if (nicheProfile.keyword_discipline !== "loose") allowed_keyword_type = ["core", "support"];
                         break;
                     case "OPEN_END":
-                        word_target = Math.round((300 + wordBias) * scaleFactor);
+                    case "OPEN_LOOP":
+                        word_target = Math.round((300 + wordBias) * (targetWords / 5000));
                         if (nicheProfile.keyword_discipline !== "loose") allowed_keyword_type = ["core"];
                         break;
                     default:
-                        word_target = Math.round((550 + wordBias) * scaleFactor);
+                        word_target = Math.round((550 + wordBias) * (targetWords / 5000));
                         break;
                 }
 
@@ -166,17 +175,17 @@ function validateModulePlan(modules) {
         throw new Error("Module đầu tiên phải là HOOK");
     }
 
-    const peakRoles = ["PEAK", "REALIZATION", "TURNING_POINT", "SHIFT"];
+    const peakRoles = ["PEAK", "REALIZATION", "TURNING_POINT", "SHIFT", "COLD_RESOLUTION"];
     const foundPeak = roles.filter(r => peakRoles.includes(r));
     if (foundPeak.length !== 1) {
         throw new Error(`Số lượng PEAK không hợp lệ: ${foundPeak.length} (${foundPeak.join(", ")}). Phải có đúng 1 peak role (${peakRoles.join(", ")}).`);
     }
 
-    if (!roles.includes("HOOK")) throw new Error("Thiếu module HOOK");
+    if (!roles.includes("HOOK") && !roles.includes("HOOK_THREAT")) throw new Error("Thiếu module HOOK");
 
     const lastModule = modules[modules.length - 1];
-    if (lastModule.role !== "OPEN_END") {
-        throw new Error(`Module cuối cùng phải là OPEN_END, nhưng nhận được ${lastModule.role}`);
+    if (lastModule.role !== "OPEN_END" && lastModule.role !== "OPEN_LOOP") {
+        throw new Error(`Module cuối cùng phải là OPEN_END hoặc OPEN_LOOP, nhưng nhận được ${lastModule.role}`);
     }
 
     const totalWords = modules.reduce((sum, m) => sum + m.word_target, 0);

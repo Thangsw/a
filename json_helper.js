@@ -5,54 +5,40 @@ function parseAIJSON(text, context = "Unknown") {
         let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
         clean = clean.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "");
 
-        // 1.5 SELF-HEAL: Attempt to fix truncated JSON (common in AI responses)
-        if (clean.includes('{') && !clean.includes('}')) {
-            console.warn(`⚠️ [JSON Parser][${context}] Truncated object detected. Attempting to fix...`);
-            clean += '"}'; // Minimal fix for string/object closure
-        }
-        if (clean.startsWith('[') && !clean.endsWith(']')) {
-            console.warn(`⚠️ [JSON Parser][${context}] Truncated array detected. Attempting to fix...`);
-            clean += '}]';
-        }
-
-        // 2. Try Standard Parse first
-        try {
-            const parsed = JSON.parse(clean);
-            if (Array.isArray(parsed)) return parsed.length > 0 ? parsed : null;
-            if (typeof parsed === 'object' && parsed !== null) return [parsed];
-        } catch (eInitial) {
-            // Extraction logic
-            let jsonStart = clean.indexOf('[');
-            let jsonEnd = clean.lastIndexOf(']');
-
-            if (jsonStart === -1) {
-                jsonStart = clean.indexOf('{');
-                jsonEnd = clean.lastIndexOf('}');
-            }
-
-            if (jsonStart !== -1 && (jsonEnd === -1 || jsonEnd < jsonStart)) {
-                // Heuristic: Close the JSON if it looks truncated
-                console.warn(`⚠️ [JSON Parser][${context}] Bad boundaries. Closing JSON manually.`);
-                const sub = clean.substring(jsonStart) + (clean.startsWith('[') ? '"}]' : '"}');
-                try {
-                    const parsed = JSON.parse(sub);
-                    return Array.isArray(parsed) ? (parsed.length > 0 ? parsed : null) : [parsed];
-                } catch (e) { }
-            }
-
-            if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
-                try {
-                    const potentialJson = clean.substring(jsonStart, jsonEnd + 1);
-                    const parsed = JSON.parse(potentialJson);
-                    if (Array.isArray(parsed)) return parsed.length > 0 ? parsed : null;
-                    if (typeof parsed === 'object') return [parsed];
-                } catch (eSub) { }
+        // 2. Try Standard Parse first (after deep cleaning)
+        const jsonMatch = clean.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+        if (jsonMatch) {
+            const potential = jsonMatch[0];
+            try {
+                const parsed = JSON.parse(potential);
+                if (Array.isArray(parsed)) return parsed.length > 0 ? parsed : null;
+                if (typeof parsed === 'object' && parsed !== null) return [parsed];
+            } catch (e) {
+                // Parse failed, proceed to salvage
             }
         }
 
-        // 3. REGEX SALVAGE (Final fallback)
+        // 3. REGEX SALVAGE (Final fallback - Extremely Aggressive)
+        // This picks up "key": "value" patterns even if JSON is broken
         const results = [];
-        const promptPattern = /"(?:image_prompt|p|video_prompt|content|cliffhanger)"\s*:\s*"((?:\\.|[^"\\])*)"/g;
+
+        // Specific for Script Modules
+        const content = extractField(clean, "content");
+        const cliff = extractField(clean, "cliffhanger");
+        const index = extractField(clean, "module_index") || "1";
+
+        if (content) {
+            results.push({
+                module_index: parseInt(index),
+                content: content,
+                cliffhanger: cliff || ""
+            });
+            console.log(`✅ [JSON Parser][${context}] Salvaged script module via deep regex.`);
+            return results;
+        }
+
+        // Generic salvage for lists (prompts, etc)
+        const promptPattern = /"(?:image_prompt|p|video_prompt|content)"\s*:\s*"((?:\\.|[^"\\])*)"/gi;
         let pMatch;
         let fallbackId = 1;
         while ((pMatch = promptPattern.exec(clean)) !== null) {
@@ -64,15 +50,36 @@ function parseAIJSON(text, context = "Unknown") {
         }
 
         if (results.length > 0) {
-            console.log(`✅ [JSON Parser][${context}] Salvaged ${results.length} items via regex.`);
+            console.log(`✅ [JSON Parser][${context}] Salvaged ${results.length} items via generic regex.`);
             return results;
         }
 
-        return null; // Ensure null on failure to trigger proper catch blocks
+        return null;
     } catch (e) {
         console.error(`❌ [JSON Parser][${context}] Critical Error:`, e.message);
         return null;
     }
+}
+
+/**
+ * Thần chú bóc tách trường dữ liệu từ text rác
+ */
+function extractField(text, fieldName) {
+    // Tìm "fieldName": "value" hoặc 'fieldName': 'value'
+    const patterns = [
+        new RegExp(`"${fieldName}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`, "i"),
+        new RegExp(`'${fieldName}'\\s*:\\s*'((?:\\\\.|[^'\\\\])*)'`, "i"),
+        new RegExp(`"${fieldName}"\\s*:\\s*(\\d+)`, "i") // For numbers like module_index
+    ];
+
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+            if (pattern.source.includes("\\d+")) return match[1];
+            return match[1].replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\n/g, '\n').trim();
+        }
+    }
+    return null;
 }
 
 module.exports = { parseAIJSON };

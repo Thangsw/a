@@ -35,7 +35,7 @@ async function assembleScript(projectId, modulesData, niche = 'documentary', tar
     const validation = validateEmotionalFlow(sortedModules, nicheProfile);
     if (!validation.pass) {
         const issuesText = Array.isArray(validation.issues) ? validation.issues.join("; ") : "Lỗi luồng cảm xúc không xác định";
-        log.warn(`⚠️ Emotional Flow Check: ${issuesText}`);
+        log.warn(`💡 [Flow Note] Một vài giai đoạn cảm xúc chưa được nhận diện rõ rệt: ${issuesText}. (Bỏ qua để tiếp tục)`);
     }
 
     // --- STEP 5.2: MERGE MODULES & HOOK PROTECTION ---
@@ -81,7 +81,7 @@ async function assembleScript(projectId, modulesData, niche = 'documentary', tar
     const finalPolishedScript = polishedModules.map(m => m.content).join("\n\n");
 
     // --- STEP 5.4: VOICE READABILITY CHECK (TOOL-BASED) ---
-    const readability = checkReadability(finalPolishedScript, nicheProfile);
+    const readability = checkReadability(finalPolishedScript, nicheProfile, targetLanguage);
 
     // --- STEP 5.5: OUTPUT & PERSISTENCE ---
     const finalResult = {
@@ -182,7 +182,7 @@ IMPORTANT: DO NOT REMOVE the [M-X] markers at the beginning of each module.
     return await executeAIPolish(projectId, prompt);
 }
 
-function checkReadability(text, profile) {
+function checkReadability(text, profile, targetLanguage = 'English') {
     const issues = [];
     const paragraphs = text.split(/\n\n+/);
     const sentences = text.match(/[^.!?]+[.!?]+/g) || [];

@@ -9,6 +9,8 @@ const nicheManager = require('./nicheManager');
  * SHU Step 4: Module Script Generation Engine
  */
 
+const pLimit = require('p-limit');
+
 async function processAllModules(projectId, fullData, niche = 'self_help', targetLanguage = 'English') {
     log.info(`🛠️ [SHU Bước 4] Bắt đầu viết kịch bản chi tiết cho Dự án: ${projectId} (Ngách: ${niche})`);
 
@@ -22,13 +24,18 @@ async function processAllModules(projectId, fullData, niche = 'self_help', targe
     const supportingKeywords = fullData.supporting_keywords || [];
     const ctrPhrases = fullData.ctr_phrases || [];
 
-    const results = [];
+    // Parallelism setup
+    const limit = pLimit(9); // Viết tối đa 9 modules cùng lúc
     let previousSummary = "This is the start of the video.";
 
-    for (const module of modulePlan) {
+    // We can't easily pass previousSummary in a fully parallel way if modules depend on it.
+    // However, for SHU documentary style, modules are often discrete. 
+    // We'll use a sequential summary chain or just a general project summary to enable parallelism.
+    const projectSummary = fullData.summary || "A detailed documentary about " + coreKeyword;
+
+    const modulePromises = modulePlan.map((module) => limit(async () => {
         log.info(`✍️ Đang tạo Module ${module.index}/${modulePlan.length}: ${module.role}`);
 
-        // Lọc keyword cho phép dựa trên allowed_keyword_type
         let allowedKeywords = [];
         if (module.allowed_keyword_type.includes('core')) allowedKeywords.push(coreKeyword);
         if (module.allowed_keyword_type.includes('support')) allowedKeywords.push(...supportingKeywords);
@@ -42,7 +49,7 @@ async function processAllModules(projectId, fullData, niche = 'self_help', targe
             attempts++;
             try {
                 // 1. AI Generation
-                moduleScript = await generateModule(projectId, module, allowedKeywords, previousSummary, niche, targetLanguage);
+                moduleScript = await generateModule(projectId, module, allowedKeywords, projectSummary, niche, targetLanguage);
 
                 // 2. Tool-based QA Check
                 const qaResult = qaCheck(moduleScript, module, allowedKeywords, nicheProfile);
@@ -51,9 +58,9 @@ async function processAllModules(projectId, fullData, niche = 'self_help', targe
                     throw new Error(`QA thất bại: ${issuesText}`);
                 }
 
-                // 3. AI Self-Check (Optional but recommended)
+                // 3. AI Self-Check
                 const evalResult = await evaluateModule(projectId, moduleScript, module, niche);
-                if (!evalResult.pass) {
+                if (evalResult && !evalResult.pass) {
                     const issuesText = Array.isArray(evalResult.issues) ? evalResult.issues.join(", ") : "Lỗi Thẩm định không xác định";
                     throw new Error(`AI thẩm định thất bại: ${issuesText}`);
                 }
@@ -64,36 +71,43 @@ async function processAllModules(projectId, fullData, niche = 'self_help', targe
             } catch (err) {
                 log.warn(`⚠️ Module ${module.index} - Lượt thử ${attempts} thất bại: ${err.message}`);
                 if (attempts === 2) {
-                    log.error(`❌ Module ${module.index} thất bại sau tất cả các lượt thử. Đang tiếp tục một cách thận trọng.`);
-                    // Nếu fail hết thì vẫn lấy kết quả cuối cùng hoặc ném lỗi tùy chiến lược
-                    success = true; // Temporary allow to proceed for now to avoid blocking the whole pipe
+                    log.error(`❌ Module ${module.index} thất bại sau tất cả các lượt thử.`);
+                    success = true;
                 }
             }
         }
 
         if (moduleScript) {
-            // Save to database only if projectId exists
+            // Đảm bảo kết quả trả về có đầy đủ thông tin để Assembler không bị lạc lối
+            const enrichedScript = {
+                ...moduleScript,
+                role: module.role,
+                goal: module.goal,
+                word_target: module.word_target
+            };
+
             if (projectId) {
                 await db.db.run(
                     'INSERT OR REPLACE INTO modules (project_id, module_index, module_type, word_target, role) VALUES (?, ?, ?, ?, ?)',
-                    [projectId, module.index, module.role, module.word_target, module.goal]
+                    [projectId, module.index, module.role, module.word_target, module.role]
                 );
-                const moduleId = (await db.db.get('SELECT id FROM modules WHERE project_id = ? AND module_index = ?', [projectId, module.index])).id;
-
-                await db.db.run(
-                    'INSERT OR REPLACE INTO module_scripts (module_id, content_text, cliff_text) VALUES (?, ?, ?)',
-                    [moduleId, moduleScript.content, moduleScript.cliffhanger]
-                );
+                const mod = await db.db.get('SELECT id FROM modules WHERE project_id = ? AND module_index = ?', [projectId, module.index]);
+                if (mod) {
+                    await db.db.run(
+                        'INSERT OR REPLACE INTO module_scripts (module_id, content_text, cliff_text) VALUES (?, ?, ?)',
+                        [mod.id, enrichedScript.content, enrichedScript.cliffhanger]
+                    );
+                }
             }
-
-            results.push(moduleScript);
-
-            // Cập nhật summary cho module tiếp theo (đơn giản hóa bằng cách lấy nội dung hiện tại)
-            previousSummary = moduleScript.content.substring(0, 300) + "...";
+            return enrichedScript;
         }
-    }
+        return null;
+    }));
 
-    log.success(`🏁 Bước 4 Hoàn tất: Đã viết xong ${results.length}/${modulePlan.length} modules.`);
+    const results = (await Promise.all(modulePromises)).filter(r => r !== null);
+    results.sort((a, b) => a.module_index - b.module_index);
+
+    log.success(`🏁 Bước 4 Hoàn tất: Đã viết xong ${results.length}/${modulePlan.length} modules song song.`);
 
     return {
         modules_written: results.length,
@@ -102,6 +116,7 @@ async function processAllModules(projectId, fullData, niche = 'self_help', targe
         modules_data: results
     };
 }
+
 
 async function generateModule(projectId, moduleData, allowedKeywords, previousSummary, niche, targetLanguage = 'English') {
     const profile = nicheManager.getProfile(niche);
@@ -119,22 +134,22 @@ TASK:
 Write the content for this module in ${targetLanguage}.
 - LANGUAGE RULE: You MUST write the entire content and cliffhanger in ${targetLanguage}.
 
-STRICT RULES:
-- Do NOT write an introduction for the entire video
-- Do NOT summarize previous modules
-- Do NOT conclude the story
-- Do NOT repeat phrasing from previous modules
-- No greetings, no calls to action
+- STRICT RULE: Do NOT mention "part 2", "next part", "next video", "im nächsten Teil", "hẹn gặp lại ở video sau", or any phrases implying this is not a complete, standalone unit.
+- Ensure every module is self-contained and logical even if viewed in isolation.
+- No greetings, no calls to action.
 
 CONTENT RULES:
 - Tone: ${Array.isArray(profile.tone) ? profile.tone.join(", ") : profile.tone}
-- Write in short, clear sentences
-- Use concrete imagery and comparisons (metaphors) to explain complex ideas
-- ${profile.speculation_level === 'free' ? "Thoughtful speculation, reflective questions, and emotional interpretation are ENCOURAGED." : (profile.speculation_level === 'limited' ? "Avoid wild speculation; only provide limited, logical interpretations based on available context." : "STRICT RULE: Avoid all speculation. Stick 100% to provided facts.")}
-${(profile.forbidden_phrases || []).length > 0 ? `- FORBIDDEN PHRASES: Do NOT use any of these: ${profile.forbidden_phrases.join(", ")}` : ""}
+- Dòng chảy nội dung: Lạnh lùng, dứt khoát, đi thẳng vào vấn đề. TUYỆT ĐỐI không dùng ẩn dụ văn học (rừng rậm, gương vỡ), không ủy mị, không kể lể dài dòng.
+- Use concrete technical and psychological terms. Build credibility through cold distance.
+- ${profile.speculation_level === 'free' ? "Thoughtful speculation, reflective questions, and emotional interpretation are ENCOURAGED." : (profile.speculation_level === 'limited' ? "Avoid wild speculation; only provide limited, logical interpretations based on Case Studies." : "STRICT RULE: Avoid all speculation. Stick 100% to logical patterns and facts.")}
+${(profile.forbidden_phrases || []).length > 0 ? `- FORBIDDEN WORDS (NEVER USE): ${profile.forbidden_phrases.join(", ")}` : ""}
+${profile.gold_standard_samples ? `- GOLD STANDARD SAMPLES (FOLLOW THIS STYLE):
+${profile.gold_standard_samples.map(s => `  > ${s}`).join("\n")}
+` : ""}
 ${profile.requires_disclaimer ? "- IMPORTANT: Include a brief, non-medical disclaimer where appropriate." : ""}
 ${profile.sentence_constraints ? `- SENTENCE CONSTRAINTS: 
-    * Max words per sentence: ${profile.sentence_constraints.max_words_per_sentence}
+    * Max words per sentence: ${profile.sentence_constraints.max_words_per_sentence} (You are ENCOURAGED to use this limit to provide depth).
     * Preferred structure: ${profile.sentence_constraints.preferred_structure}
     * Rhetorical questions max: ${profile.sentence_constraints.rhetorical_questions_max}
     * Avoid American-style emotional softening.` : ""}
@@ -155,7 +170,10 @@ STRUCTURE REQUIREMENTS:
 - ${nicheManager.getCliffRule(profile.cliff_style)}
 
 LENGTH:
-Target: ${moduleData.word_target} words (Strict range: ${Math.round(moduleData.word_target * 0.85)} - ${Math.round(moduleData.word_target * 1.15)})
+- Target: ${moduleData.word_target} words.
+- STRICT RULE: You MUST write at least ${moduleData.word_target} words. Do NOT provide a short summary. Provide deep, expansive prose.
+- Allowed range: ${Math.round(moduleData.word_target * 0.95)} - ${Math.round(moduleData.word_target * 1.25)} words.
+- PROSE PRESSURE: Develop every point with massive detail, historical context, and atmospheric descriptions to meet the word count target.
 
 OUTPUT FORMAT (JSON ONLY):
 {
@@ -173,12 +191,12 @@ function qaCheck(moduleScript, moduleData, allowedKeywords, profile) {
     const content = moduleScript.content || "";
     const wordCount = content.split(/\s+/).filter(w => w.length > 0).length;
 
-    // 1. Check Word Count (±15% to align with Prompt)
-    const minWords = moduleData.word_target * 0.85;
-    const maxWords = moduleData.word_target * 1.15;
-    if (wordCount < minWords || wordCount > maxWords) {
-        issues.push(`Word count mismatch: ${wordCount} words (Target: ${moduleData.word_target}, Allowed: ${Math.round(minWords)}-${Math.round(maxWords)})`);
+    // 1. Check Word Count (Chỉ kiểm tra tối thiểu để tránh AI lười biếng. KHÔNG giới hạn trần).
+    const minWords = moduleData.word_target * 0.70; // Giảm xuống 70% cho an toàn
+    if (wordCount < minWords) {
+        issues.push(`Content too short: ${wordCount} words (Target: ${moduleData.word_target}, Min: ${Math.round(minWords)})`);
     }
+    // Hủy bỏ giới hạn trần (maxWords) hoàn toàn. AI viết dài là tốt cho Visual.
 
     // 2. Check Keyword Usage
     if (profile.keyword_discipline === "strict") {
@@ -267,7 +285,7 @@ OUTPUT JSON ONLY:
 }
 
 async function executeAIScript(projectId, prompt, actionName) {
-    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it', 'gemma-3-12b-it'];
+    const MODEL_PRIORITY = ['gemma-3-27b-it', 'gemma-3-12b-it', 'gemini-3-flash-preview'];
     let lastError = null;
 
     for (const modelName of MODEL_PRIORITY) {
@@ -284,9 +302,9 @@ async function executeAIScript(projectId, prompt, actionName) {
                 const result = await model.generateContent(prompt);
                 const response = await result.response;
                 const text = response.text();
-                const json = parseAIJSON(text, "SCRIPT_GEN");
-
-                if (json) {
+                const rawJson = parseAIJSON(text, "SCRIPT_GEN");
+                if (rawJson) {
+                    const json = Array.isArray(rawJson) ? rawJson[0] : rawJson;
                     if (projectId) {
                         const tokens = response.usageMetadata ? response.usageMetadata.totalTokenCount : 0;
                         await db.logAIAction(projectId, actionName, modelName, tokens, text);

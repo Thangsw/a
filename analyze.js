@@ -43,6 +43,9 @@ const scriptGenerator = require('./scriptGenerator');
 const scriptAssembler = require('./scriptAssembler');
 const ctrEngine = require('./ctrEngine');
 const descriptionEngine = require('./descriptionEngine');
+const pipeline = require('./pipeline');
+const microTopicGenerator = require('./microTopicGenerator');
+const compilationAssembler = require('./compilationAssembler');
 
 const crypto = require('crypto');
 
@@ -50,7 +53,19 @@ const crypto = require('crypto');
  * Step 1 & 1.5: Content Analyzer & Hook scoring
  */
 async function analyzeContent(req, res) {
-    let { url, modelName, manualScript, projectId, profileId, niche = 'self_help', targetLanguage = 'English', word_count = 5000, output_dir = 'output' } = req.body;
+    let { url, modelName, manualScript, projectId, profileId, niche = 'dark_psychology_de', targetLanguage, word_count, output_dir = 'output', legoMode = true } = req.body;
+
+    const nicheProfile = nicheManager.getProfile(niche);
+
+    // Auto-detect defaults from niche if missing
+    if (!targetLanguage) targetLanguage = nicheProfile.language || 'English';
+    if (!word_count) {
+        if (legoMode && niche === 'dark_psychology_de') {
+            word_count = 4500; // 3 units x 1500
+        } else {
+            word_count = nicheProfile.pipeline_settings?.target_words_per_block || 1500;
+        }
+    }
 
     if (!profileId || profileId === 'null') return res.json({ success: false, error: 'Vui lòng chọn Kênh (Profile) trước khi chạy!' });
 
@@ -139,8 +154,8 @@ You are a YouTube hook evaluator. Evaluate hook strength (1-10).
 OUTPUT JSON: { "hook_score": 0.0, "dominant_trigger": "...", "ctr_potential": "high/med/low", "recommendation": "proceed/rewrite/reject" }
 `;
 
-        // Pass output_dir explicitly to avoid 'req' scoping issues later
-        const finalResult = await executeAIAnalysis(projectId, promptStep1, promptStep15, isManual, manualScriptText, audioPath, niche, targetLanguage, word_count, profileId, output_dir);
+        // Pass legoMode and output_dir explicitly
+        const finalResult = await executeAIAnalysis(projectId, promptStep1, promptStep15, isManual, manualScriptText, audioPath, niche, targetLanguage, word_count, profileId, output_dir, legoMode);
 
         res.json({ success: true, data: finalResult, projectId });
 
@@ -205,7 +220,7 @@ async function executeAIAnalysis(projectId, prompt1, prompt15, isManual, manualS
 
                 // Downstream Pipeline
                 if (finalResult.recommendation !== 'reject') {
-                    finalResult = await runDownstreamPipeline(projectId, finalResult, niche, targetLanguage, word_count, profileId, outputDir);
+                    finalResult = await runDownstreamPipeline(projectId, finalResult, niche, targetLanguage, word_count, profileId, outputDir, legoMode);
                 }
 
                 // Persistence
@@ -234,7 +249,31 @@ async function executeAIAnalysis(projectId, prompt1, prompt15, isManual, manualS
     throw lastError;
 }
 
-async function runDownstreamPipeline(projectId, finalResult, niche, targetLanguage, word_count, profileId, outputDir = 'output') {
+async function runDownstreamPipeline(projectId, finalResult, niche, targetLanguage, word_count, profileId, outputDir = 'output', legoMode = true) {
+    let microTopics = [];
+    if (legoMode && niche === 'dark_psychology_de') {
+        log.info("🧱 [LEGO Mode] Đang kích hoạt quy trình Micro-Topic (3 Arcs)...");
+
+        // SSE: Initialize LEGO Queue
+        if (global.sendSSE) {
+            global.sendSSE('queue_update', {
+                isLego: true,
+                items: [
+                    { id: 'block_1', name: 'Micro Clip 1', status: 'processing', progress: 10, type: 'micro' },
+                    { id: 'block_2', name: 'Micro Clip 2', status: 'pending', progress: 0, type: 'micro' },
+                    { id: 'block_3', name: 'Micro Clip 3', status: 'pending', progress: 0, type: 'micro' },
+                    { id: 'mega', name: 'Mega Compilation', status: 'pending', progress: 0, type: 'mega' }
+                ]
+            });
+        }
+
+        microTopics = await microTopicGenerator.generateMicroTopics(projectId, finalResult.core_keyword, finalResult.dominant_trigger, niche);
+    }
+
+    // Nếu có microTopics, chúng ta sẽ chạy generation cho từng topic (hiện tại đơn giản hóa là gộp meta)
+    // Trong tương lai, có thể lặp qua từng topic để tạo 3 bộ script/audio riêng biệt.
+    // Hiện tại: Module Planner sẽ được báo là có microTopics để nó lên kế hoạch 3 blocks.
+
     let checkpointPassed = false;
     let checkpointRetries = 0;
     let checkpointFeedback = null;
@@ -248,7 +287,8 @@ async function runDownstreamPipeline(projectId, finalResult, niche, targetLangua
             }
 
             if (!checkpointPassed && (!checkpointFeedback || checkpointFeedback.recommendation === 'replan_modules' || checkpointFeedback.recommendation === 'adjust_keywords')) {
-                const planData = await modulePlanner.planModules(projectId, finalResult, checkpointFeedback?.feedback, niche, word_count);
+                // Pass microTopics to planner if available
+                const planData = await modulePlanner.planModules(projectId, { ...finalResult, micro_topics: microTopics }, checkpointFeedback?.feedback, niche, word_count);
                 finalResult = { ...finalResult, ...planData };
             }
 
@@ -276,8 +316,119 @@ async function runDownstreamPipeline(projectId, finalResult, niche, targetLangua
         const ctrData = await ctrEngine.generateCTRBundle(projectId, finalResult.full_script, niche, targetLanguage);
         finalResult = { ...finalResult, ...ctrData };
 
-        const descData = await descriptionEngine.generateDescriptionBundle(projectId, finalResult.step5_result, niche, targetLanguage);
+        const descData = await descriptionEngine.generateDescriptionBundle(projectId, finalResult, niche, targetLanguage);
         finalResult = { ...finalResult, description_bundle: descData };
+
+        // --- STEP 7: AUTO-PILOT TO VIDEO (VOICE & ASSETS) ---
+        log.info("🚁 [SHU Pipeline] Đang tạo Voice & Assets cho kịch bản...");
+        const pipelineData = await pipeline.executeFullPipeline({
+            chapters: finalResult.modules || [],
+            profileId: profileId,
+            projectId: projectId,
+            niche: niche,
+            unified_voice: true,
+            voice_service: 'ai84',
+            output_dir: outputDir
+        });
+
+        // Merge results
+        finalResult = { ...finalResult, ...pipelineData };
+
+        // --- STEP 8: LEGO FINAL ASSEMBLY (Compilation) ---
+        if (legoMode && niche === 'dark_psychology_de') {
+            log.info("🧩 [LEGO Final] Đang ghép nối 3 micro-outputs thành Mega-Video...");
+
+            // SSE: Update Mega in Queue
+            if (global.sendSSE) {
+                global.sendSSE('queue_update', {
+                    isLego: true,
+                    items: [
+                        { id: 'block_1', name: 'Micro Clip 1', status: 'completed', progress: 100, type: 'micro' },
+                        { id: 'block_2', name: 'Micro Clip 2', status: 'completed', progress: 100, type: 'micro' },
+                        { id: 'block_3', name: 'Micro Clip 3', status: 'completed', progress: 100, type: 'micro' },
+                        { id: 'mega', name: 'Mega Compilation', status: 'processing', progress: 50, type: 'mega' }
+                    ]
+                });
+            }
+
+            const megaResult = await compilationAssembler.assembleMegaVideo(projectId, finalResult.modules || [], niche, outputDir);
+
+            // SSE: Finish Mega
+            if (global.sendSSE) {
+                global.sendSSE('queue_update', {
+                    isLego: true,
+                    items: [
+                        { id: 'block_1', name: 'Micro Clip 1', status: 'completed', progress: 100, type: 'micro' },
+                        { id: 'block_2', name: 'Micro Clip 2', status: 'completed', progress: 100, type: 'micro' },
+                        { id: 'block_3', name: 'Micro Clip 3', status: 'completed', progress: 100, type: 'micro' },
+                        { id: 'mega', name: 'Mega Compilation', status: 'completed', progress: 100, type: 'mega' }
+                    ]
+                });
+            }
+
+            // Build 3 Separate Block Results with REAL AI METADATA
+            log.info("🤖 [LEGO Hub] Đang tạo Metadata & Scroring riêng biệt cho 3 Micro-Topics...");
+            const legoBlocks = [];
+            const modules = finalResult.modules || [];
+            const blockSize = Math.ceil(modules.length / 3);
+
+            for (let i = 0; i < 3; i++) {
+                const blockModules = modules.slice(i * blockSize, (i + 1) * blockSize);
+                const blockScript = blockModules.map(m => m.script).join('\n\n');
+                const topic = microTopics[i] || { topic_title: `Micro Topic ${i + 1}`, core_question: "Unknown" };
+
+                // Generate Specific Metadata for this Block via AI
+                const blockMetaPrompt = `
+You are a YouTube SEO Expert for the German market (Style: Mr No Plan A).
+Given this script snippet, generate catchy viral titles, a deep psychological description, and relevant tags.
+Also evaluate the hook score (1-10) for this specific segment.
+
+TOPIC: ${topic.topic_title}
+MECHANISM: ${topic.named_mechanism || "Psychological manipulation"}
+SCRIPT:
+${blockScript.substring(0, 3000)}
+
+OUTPUT JSON ONLY:
+{
+  "hook_score": 0.0,
+  "titles": ["Title 1", "Title 2"],
+  "description": "...",
+  "tags": ["tag1", "tag2"],
+  "thumbnail": "Visual concept for thumbnail"
+}
+`;
+                let blockData = { hook_score: 7.0, titles: [`${topic.topic_title}`], description: `Deep dive into ${topic.named_mechanism}`, tags: ["psychology", "analysis"], thumbnail: "N/A" };
+                try {
+                    const blockRes = await audioKeyManager.executeWithRotation(async (apiKey) => {
+                        const genAI = new GoogleGenerativeAI(apiKey);
+                        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-lite' });
+                        const res = await model.generateContent(blockMetaPrompt);
+                        return parseAIResponse(res.response.text());
+                    });
+                    if (blockRes) blockData = blockRes;
+                } catch (e) { log.warn(`⚠️ Lỗi tạo metadata cho block ${i + 1}: ${e.message}`); }
+
+                legoBlocks.push({
+                    id: i + 1,
+                    full_script: blockScript,
+                    ...blockData,
+                    modules: blockModules
+                });
+            }
+
+            return {
+                ...finalResult,
+                isLego: true,
+                legoBlocks: legoBlocks,
+                mega: {
+                    ...finalResult,
+                    ...megaResult,
+                    full_script: finalResult.full_script,
+                    titles: finalResult.titles || [],
+                    metadata: finalResult.description_bundle
+                }
+            };
+        }
 
     } catch (genErr) {
         log.error(`❌ Lỗi Generator Step: ${genErr.message}`);

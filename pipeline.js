@@ -19,6 +19,7 @@ const promptEngine = require('./promptEngine');
 const nicheManager = require('./nicheManager');
 const { parseAIJSON } = require('./json_helper');
 const { log } = require('./colors');
+const voiceMerger = require('./voiceMerger');
 
 function sendMessage(event, data) {
     if (global.sendSSE) global.sendSSE(event, data);
@@ -252,73 +253,137 @@ async function processChapter(chapter, profileConfig, ttsConfig, chapterIndex, s
     return { chapter_id: chapter.chapter_id, audio: voiceResult, visual_specs: visualSpecs, visual_prompts: visualPrompts, breakdown: Array.from({ length: visualSpecs.total_images }, (_, i) => ({ id: i + 1, type: 'image', duration: visualSpecs.scene_duration })), clean_text: (chapter.content_for_tts || '').replace(/\[.*?\]/g, '').trim() };
 }
 
+async function executeFullPipeline(params) {
+    let { chapters, profileId, output_dir, skip_gen_voice, skip_media_gen, voice_service = 'ai84', projectId, srt_batch, skip_video_prompt, niche, unified_voice = true } = params;
+
+    // Load Profile
+    let profile = profileId ? (getProfileManager().getProfileData(profileId) || {}) : { visual_settings: {} };
+    if (output_dir) profile.output_dir = output_dir;
+    const outDir = profile.output_dir || 'output_files';
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+
+    const ttsConfig = getTTSConfig();
+    const nicheName = niche || profile.niche || 'self_help';
+    const nicheConfig = nicheManager.getNicheConfig(nicheName);
+
+    let finalVisualPrompts = [];
+    let totalDuration = 0;
+    let finalSrtPath = null;
+    let audioPath = null;
+
+    // --- NEW V9.1 UNIFIED VOICE FLOW ---
+    if (unified_voice && !skip_gen_voice) {
+        log.info("🚀 [Pipeline] Đang chạy luồng Unified Voice (V10.2)...");
+
+        // Lấy toàn bộ text từ chapters
+        const fullText = (chapters || []).map(ch => ch.chapter_content || ch.content_for_tts || ch.content).join("\n\n");
+
+        if (fullText.trim().length > 0) {
+            const voiceRes = await voiceMerger.processUnifiedVoice(fullText, profile, ttsConfig, outDir, voice_service);
+            if (voiceRes.success) {
+                totalDuration = voiceRes.duration;
+                finalSrtPath = voiceRes.srt_path;
+                audioPath = voiceRes.audio_path;
+                sendMessage('voice_complete', { audio_path: voiceRes.audio_path, srt_path: voiceRes.srt_path, projectId });
+            }
+        }
+    }
+
+    // --- VISUAL GENERATION (FRAGMENTED BATCHING) ---
+    if (finalSrtPath && fs.existsSync(finalSrtPath)) {
+        log.info("🎬 [Pipeline] Đang gen Visual Prompts từ SRT tổng...");
+        const visualSpecs = calculateVisualSpecs(totalDuration, profile.pipeline_settings?.scene_duration || 8, finalSrtPath, profile.visual_settings?.mapping_mode || 'N+1', 'text', null, nicheConfig);
+
+        finalVisualPrompts = await generateVisualPrompts(visualSpecs.scenes, { ...(profile.visual_settings || {}), visual_style: nicheConfig.visual_style || '', visual_rules: nicheConfig.visual_rules || '' }, "Visual Narrative", "FINAL", projectId, outDir, skip_video_prompt);
+
+        return {
+            success: true,
+            audio_path: audioPath || path.join(outDir, 'final.mp3'),
+            srt_path: finalSrtPath,
+            visual_prompts: finalVisualPrompts,
+            duration: totalDuration,
+            projectId
+        };
+    }
+
+    // --- FALLBACK TO OLD PER-CHAPTER FLOW IF NEEDED ---
+    log.warn("⚠️ [Pipeline] Fallback về luồng từng chương lẻ...");
+    const limitChapters = pLimit(parseInt(params.chapter_concurrency || "10"));
+    const results = await Promise.all((chapters || []).map((chapter, idx) => limitChapters(async () => {
+        const r = await processChapter(chapter, profile, ttsConfig, idx, skip_gen_voice, chapters.length, voice_service, projectId, skip_video_prompt, niche);
+        return r;
+    })));
+
+    return { success: true, chapters: results, projectId };
+}
+
 async function runFullPipeline(req, res) {
     try {
-        let { chapters, profileId, output_dir, skip_gen_voice, skip_media_gen, voice_service, projectId, srt_batch, skip_video_prompt, niche } = req.body;
-        if ((!chapters || chapters.length === 0) && srt_batch) {
-            chapters = srt_batch.map((item, idx) => {
-                const specs = srtParser.processContentWithSRT(item.content, 300, 8, 'N+1');
-                const display = specs?.scenes?.map(s => s.text_segment).join('\n') || item.content;
-                return { chapter_id: item.order || (idx + 1), chapter_content: item.content, content_display: display, content_for_tts: display, visual_specs: specs, use_srt: true, srt_content: item.content };
-            });
-        }
-        if (!chapters) return res.json({ success: false, error: 'Chapters missing' });
-        let profile = profileId ? (getProfileData(profileId) || {}) : { visual_settings: {} };
-        if (output_dir) profile.output_dir = output_dir;
-        const limitChapters = pLimit(parseInt(req.body.chapter_concurrency || "10"));
-        sendMessage('voice_start', { total: chapters.length, projectId });
-        const results = await Promise.all(chapters.map((chapter, idx) => limitChapters(async () => {
-            await sleep(idx * 2000);
-            const r = await processChapter(chapter, profile, getTTSConfig(), idx, skip_gen_voice, chapters.length, voice_service, projectId, skip_video_prompt, niche);
-            sendMessage('voice_item_complete', { chapter_id: chapter.chapter_id, audio_path: r.audio?.audio_path, projectId });
-            return r;
-        })));
-        results.sort((a, b) => a.chapter_id - b.chapter_id);
-        const outDir = profile.output_dir || 'output_files';
-        if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-        excelExporter.exportPromptsToExcel(results, path.join(outDir, 'storyboard_prompts.xlsx'), path.join(__dirname, '../../storyboard_prompts.xlsx'));
-        if (skip_media_gen) return res.json({ success: true, data: { chapters: results } });
-        await Promise.all(results.map(result => mediaGenerator.processChapterSequential(result, { name: 'default', skipVideoPrompt: skip_video_prompt }, outDir, (type, data) => sendMessage(type, data))));
-        res.json({ success: true, data: { chapters: results } });
-    } catch (e) { res.json({ success: false, error: e.message }); }
+        const result = await executeFullPipeline(req.body);
+        res.json({ success: true, data: result });
+    } catch (e) {
+        log.error("❌ [Pipeline Error]", e.message);
+        res.json({ success: false, error: e.message });
+    }
+}
+
+// Helper to avoid circular dependency or missing module
+function getProfileManager() {
+    return require('./profiles');
 }
 
 async function executeAI(projectId, prompt, actionName) {
-    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it', 'gemma-3-12b-it'];
+    const MODEL_PRIORITY = ['gemma-3-27b-it', 'gemma-3-12b-it', 'gemini-3-flash-preview'];
     let lastError = null;
     for (const modelName of MODEL_PRIORITY) {
-        try {
-            return await keyManager.executeWithRetry(async (apiKey) => {
-                const genAI = new GoogleGenerativeAI(apiKey);
-                log.info(`🤖 Đang xử lý Visual [Model: ${modelName}] bằng một API Key khả dụng...`);
-                const model = genAI.getGenerativeModel({ model: modelName, apiVersion: 'v1beta', generationConfig: { maxOutputTokens: 8192, temperature: 0.7 } });
-                const result = await model.generateContent(prompt);
-                const response = await result.response;
-                const text = response.text();
-                const json = parseAIJSON(text, actionName);
-                if (json) {
-                    if (projectId) await db.logAIAction(projectId, actionName, modelName, response.usageMetadata?.totalTokenCount || 0, text);
-                    return json;
-                }
-                throw new Error("Phản hồi AI không hợp lệ");
-            });
-        } catch (err) {
-            lastError = err;
-            const errMsg = err.message.toLowerCase();
-            const isRetryable = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('503') ||
-                errMsg.includes('overloaded') || errMsg.includes('exhausted') ||
-                errMsg.includes('econnreset') || errMsg.includes('etimedout') ||
-                errMsg.includes('socket') || errMsg.includes('network');
+        let retryCount = 0;
+        const maxRetries = 3;
 
-            if (isRetryable) {
-                log.warn(`⚠️ Model ${modelName} gặp lỗi tạm thời: ${err.message}. Đang thử lại hoặc model tiếp theo...`);
-                continue;
+        while (retryCount < maxRetries) {
+            try {
+                return await keyManager.executeWithRetry(async (apiKey) => {
+                    const genAI = new GoogleGenerativeAI(apiKey);
+                    log.info(`🤖 [${actionName}] Executing with ${modelName} (Attempt ${retryCount + 1})...`);
+                    const model = genAI.getGenerativeModel({
+                        model: modelName,
+                        apiVersion: 'v1beta',
+                        generationConfig: { maxOutputTokens: 8192, temperature: 0.7 }
+                    });
+
+                    const result = await model.generateContent(prompt);
+                    const response = await result.response;
+                    const text = response.text();
+                    const rawJson = parseAIJSON(text, actionName);
+
+                    if (rawJson) {
+                        const json = Array.isArray(rawJson) ? rawJson[0] : rawJson;
+                        if (projectId) await db.logAIAction(projectId, actionName, modelName, response.usageMetadata?.totalTokenCount || 0, text);
+                        return json;
+                    }
+                    throw new Error("Phản hồi AI không hợp lệ (Không tìm thấy JSON)");
+                });
+            } catch (err) {
+                lastError = err;
+                const errMsg = err.message.toLowerCase();
+                const isRetryable = errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('503') ||
+                    errMsg.includes('overloaded') || errMsg.includes('exhausted') ||
+                    errMsg.includes('econnreset') || errMsg.includes('etimedout') ||
+                    errMsg.includes('socket') || errMsg.includes('network');
+
+                if (isRetryable && retryCount < maxRetries - 1) {
+                    const delay = 2000 * Math.pow(2, retryCount);
+                    log.warn(`⚠️ Lỗi tạm thời trên ${modelName}: ${err.message}. Thử lại sau ${delay}ms...`);
+                    await sleep(delay);
+                    retryCount++;
+                    continue;
+                }
+
+                log.warn(`❌ Model ${modelName} thất bại hoàn toàn: ${err.message}`);
+                break; // Thử model tiếp theo trong MODEL_PRIORITY
             }
-            throw err;
         }
     }
     throw lastError;
 }
 
-router.post('/run-pipeline', runFullPipeline);
-module.exports = { router, runFullPipeline, processChapter, calculateVisualSpecs, generateVisualPrompts, generateImagePrompts };
+module.exports = { router, runFullPipeline, executeFullPipeline, processChapter, calculateVisualSpecs, generateVisualPrompts, generateImagePrompts };

@@ -74,7 +74,7 @@ function calculateTimestamps(modules) {
         timestamps.push({
             time: timeStr,
             seconds: currentTimeSeconds,
-            title: mod.role.replace(/_/g, ' ').toUpperCase(),
+            title: (mod.role || "MODULE").replace(/_/g, ' ').toUpperCase(),
             index: mod.module_index
         });
 

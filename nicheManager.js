@@ -45,83 +45,41 @@ const NICHE_PROFILES = {
         }
     },
 
-    self_help: {
-        name: "Self Help (German Market)",
-        market: "DE",
-        writer_role: "psychological self-help storyteller (German Style)",
-        tone: ["empathetic", "reflective", "honest", "calm", "intense", "psychological"],
-        speculation_level: "free",
-        keyword_discipline: "loose",
-        cliff_style: "emotional-question",
-        forbidden_phrases: ["buy now", "subscribe", "guaranteed success", "click here", "motivation code"],
-        emotional_arc: ["hook", "pain", "awareness", "shift", "open_loop"],
-        emotional_requirements: { empathy_mirror: true, reflection_signals: true, deep_psychology: true },
-        visual_style: "Minimalist 2D hand-drawn doodle illustration on a muted green background (#c6d3bc)",
-        visual_rules: "Simple clean lines, stick-man style characters, symbolic representation (light bulb, heart, thought bubbles), zero shading, flat colors. Like psych2go but simpler minimalist doodle art.",
-        visual_mapping_strategy: "per_dialogue",
-        sentence_constraints: {
-            max_words_per_sentence: 14,
-            preferred_structure: "declarative",
-            rhetorical_questions_max: 1,
-            avoid_american_style: true
-        },
-        cultural_rules: {
-            avoid_hype: true,
-            avoid_emotional_validation: false, // Empathy is allowed in self-help
-            focus_on_mechanism: true,
-            cause_effect_priority: true
-        },
-        polish_prompt: "You are a senior self-help narrative editor. Polish only the BODY. Improve emotional flow and voice delivery. Add natural pauses. Enhance empathy and reflection. Avoid motivational clichés.",
-        ctr_config: {
-            strategy: "emotional_curiosity",
-            title_rules: {
-                language_lock: "German",
-                style: "direct_address",
-                allowed_patterns: [
-                    "Warum du dich luôn luôn einsam fühlst",
-                    "So ngừngst du negative Gedanken",
-                    "Das Geheimnis innerer Ruhe",
-                    "Wenn du das tust, ändert sich dein Leben"
-                ],
-                rules: "Speak directly to 'you'. Focus on emotional pain/reflection. 6-12 words max. Formula: Emotional pain + Direct address + Curiosity gap."
-            },
-            thumbnail_rules: {
-                style: "doodle_minimal",
-                elements: "Subject: Simple doodle character in a relatable emotional state. Background: Muted green (Doodle Style)."
-            }
-        },
-        description_style: {
-            tone: "empathetic_expert",
-            focus_on_value: true,
-            include_reflection_questions: true
-        }
-    },
-
     dark_psychology_de: {
-        name: "Dark Psychology (German Market)",
+        name: "Dark Psychology DE (Mr No Plan A)",
         language: "German",
         market: "DE",
-        writer_role: "cold psychological analyst and behavioral observer",
-        tone: ["direct", "analytical", "controlled", "cold", "non-empathetic"],
+        writer_role: "cold psychological analyst and senior behavioral observer (Style: Mr No Plan A)",
+        tone: ["cold", "analytical", "authoritative", "direct", "unemotional", "logic-driven"],
         speculation_level: "limited",
         keyword_discipline: "strict",
         sentence_constraints: {
-            max_words_per_sentence: 14,
+            max_words_per_sentence: 45,
             preferred_structure: "declarative",
             rhetorical_questions_max: 1,
             avoid_american_style: true
         },
         forbidden_phrases: [
+            "stell dir vor", "dunkler wald", "herzschmerz", "traurig", "vielleicht",
             "you deserve", "healing", "self love", "motivation",
-            "everything will change", "this will save you", "believe in yourself"
+            "everything will change", "this will save you", "believe in yourself",
+            "buy now", "subscribe", "guaranteed success", "click here", "motivation code"
         ],
         allowed_core_concepts: [
-            "control", "power", "respect", "boundaries", "manipulation", "status", "social hierarchy"
+            "System", "Signal", "Kontrolle", "Strategie", "Macht", "Fakt", "Dominanz", "Status"
+        ],
+        gold_standard_samples: [
+            "Warum wirst du immer wieder respektlos behandelt? Es ist kein Zufall. Und es ist auch kein Pech. Es ist ein System. Du sendest unbewusst Signale aus, die anderen sagen: 'Du kannst mit mir machen, was du willst.'",
+            "Hör auf, dich zu erklären. Wenn dich jemand angreift hoặc kritisiert, ist dein erster Instinkt: Verteidigung. Das ist ein Fehler. In dem Moment, in dem du dich rechtfertigst, ordnest du dich unter.",
+            "Narzissten und Manipulatoren suchen keine Lösung. Sie suchen eine Reaktion. Deine Wut, deine Tränen, deine Argumente – das là ihr Treibstoff. Wenn du emotional reagierst, haben sie gewonnen."
         ],
         emotional_arc: [
             "hook_threat", "mechanism_exposed", "power_imbalance", "boundary_definition", "cold_resolution", "open_loop"
         ],
         cliff_style: "logical-threat",
+        visual_style: "Dark, high-contrast cinematic clinical atmosphere. Minimalist, cold tones (slate, deep red accents). Professional behavioral analysis vibe.",
+        visual_rules: "Cold office settings, psychological observation rooms, blueprints of human behavior, high-contrast eyes, sharp shadows. No smiling, no friendly colors.",
+        visual_mapping_strategy: "per_dialogue",
         cultural_rules: {
             avoid_hype: true,
             avoid_emotional_validation: true,
@@ -170,13 +128,18 @@ const NICHE_PROFILES = {
             logic_gap_check: true,
             american_tone_check: true
         },
-        polish_prompt: "Polish for clarity and logical flow only. Remove emotional softening. Shorten sentences. Maintain a cold, analytical tone. Do NOT add empathy, motivation, or reassurance.",
+        polish_prompt: "You are a senior cold-logic editor. Remove ALL poetic metaphors, melancholic storytelling, and emotional softening. Shorten sentences. Use punchy, authoritative German. Ensure it sounds like a clinical behavioral analysis, not a novel (Style: Mr No Plan A).",
         description_style: {
             tone: "informative",
             avoid_storytelling: true,
             focus_on_explanation: true
         },
-        visual_mapping_strategy: "per_dialogue"
+        pipeline_settings: {
+            target_words_per_block: 1500,
+            num_blocks: 3,
+            target_language: "German",
+            voice_id: "helmut_v2" // Phỏng đoán ID giọng nói
+        }
     },
 
 
@@ -263,7 +226,6 @@ const ROLE_PROPERTIES = {
 const ROLE_MAP = {
     science: ["HOOK", "CONTEXT", "DISCOVERY", "EVIDENCE", "ANALYSIS", "THEORY", "PEAK", "RECAP", "OPEN_END"],
     documentary: ["HOOK", "EXPOSITION", "RISING_ACTION", "COMPLICATION", "TURNING_POINT", "PEAK", "RESOLUTION", "OPEN_END"],
-    self_help: ["HOOK", "PAIN", "STORY", "INSIGHT", "SHIFT", "REALIZATION", "REFRAME", "OPEN_END"],
     dark_psychology_de: ["HOOK_THREAT", "MECHANISM_EXPOSED", "POWER_IMBALANCE", "BOUNDARY_DEFINITION", "COLD_RESOLUTION", "OPEN_LOOP"],
     health: ["HOOK", "SYMPTOM", "BIOLOGY", "LIFESTYLE", "SOLUTION", "PEAK", "ACTION_PLAN", "OPEN_END"],
     void_chaser: ["HOOK", "MYSTERY_SETUP", "INVESTIGATION", "ESCALATION", "REVELATION", "PEAK", "RECAP", "OPEN_END"]
@@ -287,10 +249,10 @@ function getRoleProperty(role) {
 
 const ARC_STAGE_MAP = {
     hook: ["HOOK", "HOOK_THREAT"],
-    pain: ["PAIN", "MECHANISM_EXPOSED"],
+    pain: ["MECHANISM_EXPOSED"],
     symptom: ["SYMPTOM"],
     evidence: ["EVIDENCE", "DISCOVERY", "CONTEXT", "POWER_IMBALANCE"],
-    rising_action: ["EXPOSITION", "RISING_ACTION", "COMPLICATION", "BOUNDARY_DEFINITION", "STORY"],
+    rising_action: ["EXPOSITION", "RISING_ACTION", "COMPLICATION", "BOUNDARY_DEFINITION"],
     analysis: ["ANALYSIS", "THEORY"],
     explanation: ["BIOLOGY", "LIFESTYLE", "CONTEXT"],
     awareness: ["INSIGHT", "REALIZATION"],
