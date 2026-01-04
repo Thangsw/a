@@ -138,7 +138,7 @@ const NICHE_PROFILES = {
             target_words_per_block: 1500,
             num_blocks: 3,
             target_language: "German",
-            voice_id: "helmut_v2" // Phỏng đoán ID giọng nói
+            voice_id: "oae6GCCzwoEbfc5FHdEu" // Fallback ID for GenAI
         }
     },
 
@@ -249,14 +249,19 @@ function getRoleProperty(role) {
 
 const ARC_STAGE_MAP = {
     hook: ["HOOK", "HOOK_THREAT"],
+    hook_threat: ["HOOK_THREAT"], // Specific for LEGO_MICRO
+    mechanism_exposed: ["MECHANISM_EXPOSED"], // Specific for LEGO_MICRO
     pain: ["MECHANISM_EXPOSED"],
     symptom: ["SYMPTOM"],
+    power_imbalance: ["POWER_IMBALANCE"], // Specific for LEGO_MICRO
     evidence: ["EVIDENCE", "DISCOVERY", "CONTEXT", "POWER_IMBALANCE"],
+    boundary_definition: ["BOUNDARY_DEFINITION"], // Specific for LEGO_MICRO
     rising_action: ["EXPOSITION", "RISING_ACTION", "COMPLICATION", "BOUNDARY_DEFINITION"],
     analysis: ["ANALYSIS", "THEORY"],
     explanation: ["BIOLOGY", "LIFESTYLE", "CONTEXT"],
     awareness: ["INSIGHT", "REALIZATION"],
     shift: ["SHIFT", "REFRAME"],
+    cold_resolution: ["COLD_RESOLUTION"], // Specific for LEGO_MICRO
     solution: ["SOLUTION", "ACTION_PLAN", "COLD_RESOLUTION"],
     peak: ["PEAK", "TURNING_POINT", "REALIZATION", "SHIFT"],
     resolution: ["RESOLUTION", "RECAP"],

@@ -2,6 +2,7 @@ const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = re
 const fs = require('fs-extra');
 const path = require('path');
 const db = require('./database');
+const { log } = require('./colors');
 
 async function exportToDocx(projectId, outputPath) {
     try {

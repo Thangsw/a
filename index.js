@@ -120,6 +120,31 @@ app.post('/api/config', (req, res) => {
     }
 });
 
+// Utility: Open folder on Windows
+app.post('/api/utils/open-folder', (req, res) => {
+    const { path: folderPath, projectId, subBlock } = req.body;
+    if (!folderPath) return res.json({ success: false, error: 'Path is required' });
+
+    try {
+        const { exec } = require('child_process');
+        // Build full path: base + project id + optional sub-block
+        let fullPath = path.join(folderPath, projectId ? projectId.toString() : '');
+        if (subBlock) fullPath = path.join(fullPath, subBlock);
+
+        log.info(`📂 Yêu cầu mở thư mục: ${fullPath}`);
+
+        if (fs.existsSync(fullPath)) {
+            // Windows 'start' command
+            exec(`start "" "${fullPath}"`);
+            res.json({ success: true });
+        } else {
+            res.json({ success: false, error: `Thư mục không tồn tại: ${fullPath}` });
+        }
+    } catch (e) {
+        res.json({ success: false, error: e.message });
+    }
+});
+
 // ===== API: Keys CRUD =====
 app.post('/api/keys', (req, res) => {
     const { key } = req.body;

@@ -13,7 +13,7 @@ async function assembleScript(projectId, modulesData, niche = 'documentary', tar
     log.info(`🔗 [SHU Step 5] Assembling Script for Project: ${projectId} (Niche: ${niche})`);
 
     const nicheProfile = nicheManager.getProfile(niche);
-    const modules = Array.isArray(modulesData) ? modulesData : (modulesData.modules_data || []);
+    const modules = Array.isArray(modulesData) ? modulesData : (modulesData.modules || modulesData.modules_data || []);
 
     if (modules.length === 0) {
         throw new Error("No module data provided for assembly.");
@@ -22,31 +22,33 @@ async function assembleScript(projectId, modulesData, niche = 'documentary', tar
     // Sort modules by index
     const sortedModules = [...modules].sort((a, b) => a.module_index - b.module_index);
 
-    // --- GAP CHECK: Ensure no modules are missing in sequence ---
+    // --- GAP CHECK: Ensure no modules are missing in sequence (Adaptive for LEGO Arcs) ---
+    const startIndex = sortedModules[0] ? sortedModules[0].module_index : 1;
     for (let i = 0; i < sortedModules.length; i++) {
-        const expectedIndex = i + 1;
+        const expectedIndex = startIndex + i;
         if (sortedModules[i].module_index !== expectedIndex) {
             log.error(`❌ [Assembler] Phát hiện thiếu Module tại Index ${expectedIndex}. Sequence: ${sortedModules.map(m => m.module_index).join(',')}`);
-            throw new Error(`Kịch bản không liên tục: Thiếu Module ${expectedIndex}. Vui lòng chạy lại Planner.`);
+            throw new Error(`Kịch bản không liên tục: Thiếu Module ${expectedIndex}.`);
         }
     }
 
-    // --- STEP 5.1: MODULE ORDER & EMOTIONAL FLOW CHECK (DATA-DRIVEN) ---
+    // --- STEP 5.1: EMOTIONAL FLOW VALIDATION & SCORING ---
     const validation = validateEmotionalFlow(sortedModules, nicheProfile);
     if (!validation.pass) {
-        const issuesText = Array.isArray(validation.issues) ? validation.issues.join("; ") : "Lỗi luồng cảm xúc không xác định";
-        log.warn(`💡 [Flow Note] Một vài giai đoạn cảm xúc chưa được nhận diện rõ rệt: ${issuesText}. (Bỏ qua để tiếp tục)`);
+        log.warn(`⚠️ [Flow Score: ${validation.score}/10] Một vài giai đoạn cảm xúc chưa rõ rệt: ${validation.issues.join('; ')}. Tiếp tục với kịch bản thô.`);
+    } else {
+        log.info(`✅ [Flow Score: ${validation.score}/10] Dòng chảy cảm xúc đạt yêu cầu.`);
     }
 
     // --- STEP 5.2: MERGE MODULES & HOOK PROTECTION ---
-    // Extract HOOK (module 1) to protect it from AI softening
-    const hookModule = sortedModules.find(m => m.module_index === 1);
-    const bodyModules = sortedModules.filter(m => m.module_index !== 1);
+    // Extract HOOK (first module of segment) to protect it from AI softening
+    const hookModule = sortedModules[0];
+    const bodyModules = sortedModules.slice(1);
 
-    const hookText = hookModule ? hookModule.content : "";
+    const hookText = hookModule ? (hookModule.content || hookModule.script || "") : "";
 
     // Add markers to body modules to preserve boundaries during polish
-    const bodyRaw = bodyModules.map(m => `[M-${m.module_index}]\n${m.content}`).join("\n\n");
+    const bodyRaw = bodyModules.map(m => `[M-${m.module_index}]\n${m.content || m.script || ""}`).join("\n\n");
 
     // --- STEP 5.3: EMOTIONAL FLOW POLISH (AI CALL - BODY ONLY) ---
     log.info(`✨ Polishing script BODY for ${niche.toUpperCase()} (Protecting HOOK)...`);
@@ -65,16 +67,15 @@ async function assembleScript(projectId, modulesData, niche = 'documentary', tar
         modulesMap.set(index, content);
     }
 
-    // Fallback: If AI stripped markers, just use raw modules but log warning
     if (modulesMap.size <= 1 && bodyModules.length > 0) {
         log.warn("⚠️ AI stripped module markers during polish. Falling back to unpolished modules for individual chapters.");
-        bodyModules.forEach(m => modulesMap.set(m.module_index, m.content));
+        bodyModules.forEach(m => modulesMap.set(m.module_index, m.content || m.script || m.goal));
     }
 
     // Create polished modules array for the next steps
     const polishedModules = sortedModules.map(m => ({
         ...m,
-        content: modulesMap.get(m.module_index) || m.content
+        content: modulesMap.get(m.module_index) || m.content || m.script
     }));
 
     // Re-join for full script display
@@ -127,35 +128,41 @@ function validateEmotionalFlow(modules, profile) {
     const arcStages = profile.emotional_arc || [];
     const arcMap = nicheManager.ARC_STAGE_MAP;
 
-    if (arcStages.length === 0) return { pass: true, issues: [] };
+    if (arcStages.length === 0) return { pass: true, score: 10, issues: [] };
 
     const roles = modules.map(m => m.role);
+    let stagesFound = 0;
 
-    // Check if each arc stage is represented by at least one module role
+    // Check if each arc stage is represented
     arcStages.forEach(stage => {
         const allowedRoles = arcMap[stage] || [];
         const hasStage = roles.some(r => allowedRoles.includes(r));
-        if (!hasStage) {
+        if (hasStage) {
+            stagesFound++;
+        } else {
             issues.push(`Missing emotional stage: ${stage.toUpperCase()}`);
         }
     });
 
-    // Check sequence: Roles should appear in roughly the same order as arcStages
+    // Score calculation (0-10)
+    const score = Math.round((stagesFound / arcStages.length) * 10);
+
+    // Check sequence
     let lastFoundIdx = -1;
     arcStages.forEach(stage => {
         const allowedRoles = arcMap[stage] || [];
         const stageIdx = roles.findIndex(r => allowedRoles.includes(r));
-
         if (stageIdx !== -1) {
             if (stageIdx < lastFoundIdx) {
-                issues.push(`Emotional flow regression: ${stage.toUpperCase()} found before previous stage.`);
+                issues.push(`Emotional flow regression: ${stage.toUpperCase()} found out of order.`);
             }
             lastFoundIdx = stageIdx;
         }
     });
 
     return {
-        pass: issues.length === 0,
+        pass: score >= 7, // Auto-pass if score is 7/10 or higher
+        score,
         issues
     };
 }
@@ -256,10 +263,16 @@ function checkReadability(text, profile, targetLanguage = 'English') {
     };
 }
 
-async function executeAIPolish(projectId, prompt) {
-    const MODEL_PRIORITY = ['gemma-3-27b-it', 'gemma-3-12b-it', 'gemini-3-flash-preview'];
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
-    return await keyManager.executeWithRetry(async (apiKey) => {
+async function executeAIPolish(projectId, prompt) {
+    // Primary: Gemini 3 Flash, Fallback: Gemma 3
+    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it', 'gemma-3-12b-it'];
+
+    return await keyManager.executeWithRetry(async (apiKey, proxy) => {
+        const proxyUrl = keyManager.formatProxyUrl(proxy);
+        const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : null;
+
         const genAI = new GoogleGenerativeAI(apiKey);
         let lastError = null;
 
@@ -269,6 +282,8 @@ async function executeAIPolish(projectId, prompt) {
                     model: modelName,
                     apiVersion: 'v1beta',
                     generationConfig: { maxOutputTokens: 8192, temperature: 0.4 } // Lower temp for consistency
+                }, {
+                    httpOptions: agent ? { agent } : undefined
                 });
 
                 const result = await model.generateContent(prompt);

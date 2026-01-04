@@ -1,0 +1,2876 @@
+﻿<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚡ 11testAuto Pipeline</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/proxy_widget.css">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header>
+            <h1>⚡ 11testAuto Pipeline</h1>
+            <div class="controls">
+                <button onclick="triggerBackup()" class="btn-small" style="margin-right: 10px; background: #2c3e50;"
+                    title="Sao lưu toàn bộ Source Code">💾 Backup Source</button>
+                <select id="profileSelect" title="Chọn Module">
+                    <option value="dark_psychology_de">🧠 Dark Psych (German)</option>
+                    <option value="science">🔭 Science & Astronomy</option>
+                    <option value="documentary">📽️ Documentary / History</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="main-grid">
+
+            <!-- Left: Workflow Modules -->
+            <div class="col-left">
+
+                <!-- Module 1: Analyze -->
+                <div class="card module" id="module-analyze">
+                    <div class="module-header">
+                        <h2>1. 📥 Phân Tích (Audio-First)</h2>
+                        <!-- Model Selector Removed, defaults to gemma-3-27b-it -->
+                    </div>
+
+                    <div class="module-body">
+                        <div class="input-row" style="display: none;">
+                            <div class="input-flex-2">
+                                <select id="targetLanguage">
+                                    <option value="German" selected>German</option>
+                                    <option value="English">English</option>
+                                    <option value="Vietnamese">Vietnamese</option>
+                                </select>
+                            </div>
+                            <div class="input-flex-1" style="display: flex; gap: 5px;">
+                                <input type="number" id="targetWordCount" value="5000">
+                                <select id="lengthUnit">
+                                    <option value="words" selected>Từ</option>
+                                </select>
+                            </div>
+                        </div>
+                        <textarea id="videoUrl" placeholder="🔗 Dán danh sách YouTube URL vào đây (mỗi link 1 dòng)..."
+                            rows="3"
+                            style="width: 100%; background: #222; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px; margin-top: 10px;"></textarea>
+
+                        <!-- Options Row: Pipeline Controls -->
+                        <div class="voice-controls"
+                            style="margin: 15px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                            <label class="checkbox-container" title="Bỏ qua tạo giọng nói (Skip Voice)">
+                                <input type="checkbox" id="skipVoiceGen">
+                                <span class="checkmark"></span>
+                                ⏭️ Bỏ qua tạo giọng
+                            </label>
+                            <label class="checkbox-container" title="Chỉ xuất text và excel, bỏ qua gen ảnh/video">
+                                <input type="checkbox" id="skipMediaGen">
+                                <span class="checkmark"></span>
+                                📊 Chỉ xuất Excel
+                            </label>
+                            <label class="checkbox-container" title="Sử dụng file SRT đã có sẵn (không cần AI84/AI33)">
+                                <input type="checkbox" id="useExistingSRT" onchange="toggleSRTUpload(this.checked)">
+                                <span class="checkmark"></span>
+                                📂 Sử dụng SRT
+                            </label>
+                            <label class="checkbox-container" title="Dùng kịch bản dán thủ công thay vì gen qua AI">
+                                <input type="checkbox" id="useManualScript">
+                                <span class="checkmark"></span>
+                                ⬇️ Manual Script (Kịch bản dán)
+                            </label>
+                        </div>
+
+                        <!-- SRT Upload Area (Drag & Drop) -->
+                        <div id="srtUploadArea" class="hidden" style="margin-bottom: 15px;">
+                            <label style="font-size: 0.85em; color: #3498db; margin-bottom: 8px; display: block;">📂 Kéo
+                                thả các file SRT vào đây:</label>
+
+                            <div id="srtDropZone" class="drop-zone"
+                                onclick="document.getElementById('srtFileInput').click()">
+                                <p>📤 Kéo thả nhiều file SRT hoặc Click để chọn</p>
+                                <p style="font-size: 0.75em; margin-top: 5px; opacity: 0.7;">Hỗ trợ upload 9-10 chương
+                                    cùng lúc</p>
+                                <input type="file" id="srtFileInput" accept=".srt" multiple style="display: none;">
+                            </div>
+
+                            <div id="srtFileList" class="srt-file-list">
+                                <!-- File items will be rendered here -->
+                            </div>
+                        </div>
+
+                        <!-- Manual Script Hidden Box -->
+                        <div id="manualScriptBox" class="hidden" style="margin-bottom: 10px;">
+                            <textarea id="manualScriptInput" rows="5"
+                                placeholder="Dán nội dung bài viết/kịch bản vào đây để phân tích trực tiếp (Bỏ qua tải Audio)..."
+                                style="width: 100%; background: #222; border: 1px solid #444; color: #fff; padding: 10px; border-radius: 4px;"></textarea>
+                        </div>
+
+                        <button class="btn-gradient" onclick="runOneClickAutomation()">🚀 AUTO-GENERATE
+                            (One-Click)</button>
+
+                        <!-- Real-time Process Log -->
+                        <div class="process-log hidden" id="automationLog">
+                            <h4>📜 Process Log</h4>
+                            <div id="automationLogContent" class="log-content"></div>
+                        </div>
+                    </div>
+
+                    <!-- Analysis Result -->
+                    <div id="analyzeResult" class="result-box hidden">
+                        <h3>🔍 Kết quả Phân Tích</h3>
+                        <div class="result-layout">
+                            <div class="result-col">
+                                <div class="result-item">
+                                    <label>🎯 Core Keyword:</label>
+                                    <span id="resCore">-</span>
+                                </div>
+                            </div>
+                            <div class="result-col result-col-wide">
+                                <div class="result-item">
+                                    <label>📝 Tóm tắt:</label>
+                                    <p id="resSummary">-</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="result-item">
+                            <label>🎣 Hooks:</label>
+                            <div id="resHooks" class="tag-container"></div>
+                        </div>
+                        <div class="result-item">
+                            <label>🔑 Keywords:</label>
+                            <div id="resKeywords" class="tag-container"></div>
+                        </div>
+                        <div class="result-item">
+                            <label>📐 Cấu trúc:</label>
+                            <pre id="resStructure"></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SHU HUB: LARGE FRAMES FOR EACH CLIP -->
+                <section id="shuHub" style="margin-top: 20px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h2 style="color: #a855f7; display: flex; align-items: center; gap: 10px;">🪐 Antigravity SHU
+                            Hub <span id="hubScore" class="score-badge">--/10</span></h2>
+                        <button class="btn-tiny" onclick="exportFullProject()">💾 Export All</button>
+                    </div>
+
+                    <!-- Micro Block 1 -->
+                    <div id="shu-card-1" class="card module"
+                        style="margin-bottom: 20px; border-top: 4px solid #a855f7;">
+                        <div class="module-header">
+                            <h2>🎬 Micro Clip 1</h2>
+                            <span id="ov-opt-1" class="score-badge">Hook: --</span>
+                        </div>
+                        <div class="module-body">
+                            <div class="shu-item">
+                                <label>📌 Titles (Suggest):</label>
+                                <div id="hub-titles-1" class="shu-titles" style="margin: 10px 0;"></div>
+                            </div>
+                            <div class="shu-item" style="margin-top: 10px;">
+                                <label>📝 Script & Description:</label>
+                                <div id="ov-desc-1" class="shu-content-box"
+                                    style="background: #0f172a; padding: 10px; border-radius: 4px; border: 1px solid #334155; min-height: 60px; margin-top: 5px; font-size: 0.9em; line-height: 1.5;">
+                                </div>
+                            </div>
+                            <div class="shu-item" style="margin-top: 10px;">
+                                <label>🖼️ Thumbnail Concept:</label>
+                                <div id="ov-thumb-1" class="shu-content-box"
+                                    style="background: #1e293b; padding: 10px; border-radius: 4px; border: 1px dashed #475569; min-height: 40px; margin-top: 5px; font-size: 0.85em; color: #94a3b8;">
+                                </div>
+                            </div>
+                            <div class="shu-item"
+                                style="margin-top: 15px; border-top: 1px solid #334155; padding-top: 10px;">
+                                <label>🔊 Voice Audio:</label>
+                                <audio id="audio-1" controls style="width: 100%; margin-top: 5px;"></audio>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Micro Block 2 -->
+                    <div id="shu-card-2" class="card module"
+                        style="margin-bottom: 20px; border-top: 4px solid #a855f7;">
+                        <div class="module-header">
+                            <h2>🎬 Micro Clip 2</h2>
+                            <span id="ov-opt-2" class="score-badge">Hook: --</span>
+                        </div>
+                        <div class="module-body">
+                            <div class="shu-item">
+                                <label>📌 Titles (Suggest):</label>
+                                <div id="hub-titles-2" class="shu-titles" style="margin: 10px 0;"></div>
+                            </div>
+                            <div class="shu-item" style="margin-top: 10px;">
+                                <label>📝 Script & Description:</label>
+                                <div id="ov-desc-2" class="shu-content-box"
+                                    style="background: #0f172a; padding: 10px; border-radius: 4px; border: 1px solid #334155; min-height: 60px; margin-top: 5px; font-size: 0.9em; line-height: 1.5;">
+                                </div>
+                            </div>
+                            <div class="shu-item" style="margin-top: 10px;">
+                                <label>🖼️ Thumbnail Concept:</label>
+                                <div id="ov-thumb-2" class="shu-content-box"
+                                    style="background: #1e293b; padding: 10px; border-radius: 4px; border: 1px dashed #475569; min-height: 40px; margin-top: 5px; font-size: 0.85em; color: #94a3b8;">
+                                </div>
+                            </div>
+                            <div class="shu-item"
+                                style="margin-top: 15px; border-top: 1px solid #334155; padding-top: 10px;">
+                                <label>🔊 Voice Audio:</label>
+                                <audio id="audio-2" controls style="width: 100%; margin-top: 5px;"></audio>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Micro Block 3 -->
+                    <div id="shu-card-3" class="card module"
+                        style="margin-bottom: 20px; border-top: 4px solid #a855f7;">
+                        <div class="module-header">
+                            <h2>🎬 Micro Clip 3</h2>
+                            <span id="ov-opt-3" class="score-badge">Hook: --</span>
+                        </div>
+                        <div class="module-body">
+                            <div class="shu-item">
+                                <label>📌 Titles (Suggest):</label>
+                                <div id="hub-titles-3" class="shu-titles" style="margin: 10px 0;"></div>
+                            </div>
+                            <div class="shu-item" style="margin-top: 10px;">
+                                <label>📝 Script & Description:</label>
+                                <div id="ov-desc-3" class="shu-content-box"
+                                    style="background: #0f172a; padding: 10px; border-radius: 4px; border: 1px solid #334155; min-height: 60px; margin-top: 5px; font-size: 0.9em; line-height: 1.5;">
+                                </div>
+                            </div>
+                            <div class="shu-item" style="margin-top: 10px;">
+                                <label>🖼️ Thumbnail Concept:</label>
+                                <div id="ov-thumb-3" class="shu-content-box"
+                                    style="background: #1e293b; padding: 10px; border-radius: 4px; border: 1px dashed #475569; min-height: 40px; margin-top: 5px; font-size: 0.85em; color: #94a3b8;">
+                                </div>
+                            </div>
+                            <div class="shu-item"
+                                style="margin-top: 15px; border-top: 1px solid #334155; padding-top: 10px;">
+                                <label>🔊 Voice Audio:</label>
+                                <audio id="audio-3" controls style="width: 100%; margin-top: 5px;"></audio>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Mega Block -->
+                    <div id="shu-card-mega" class="card module mega-border"
+                        style="margin-bottom: 20px; border-top: 5px solid #8e44ad;">
+                        <div class="module-header" style="background: linear-gradient(90deg, #8e44ad, #9b59b6);">
+                            <h2 style="color: white;">🔥 Mega Video (Combined)</h2>
+                            <span id="ov-opt-mega" class="score-badge" style="background: #fff; color: #8e44ad;">Mega
+                                Score: --</span>
+                        </div>
+                        <div class="module-body">
+                            <div class="shu-item">
+                                <label>🎯 Master Titles:</label>
+                                <div id="hub-titles-mega" class="shu-titles" style="margin: 10px 0;"></div>
+                            </div>
+                            <div class="shu-item" style="margin-top: 10px;">
+                                <label>📝 Full Description:</label>
+                                <div id="ov-desc-mega" class="shu-content-box"
+                                    style="background: #0f172a; padding: 10px; border-radius: 4px; border: 1px solid #334155; min-height: 80px; margin-top: 5px; font-size: 0.9em; line-height: 1.5;">
+                                </div>
+                            </div>
+                            <div class="shu-item" style="margin-top: 10px;">
+                                <label>🖼️ Master Thumbnail Concept:</label>
+                                <div id="ov-thumb-mega" class="shu-content-box"
+                                    style="background: #1e293b; padding: 10px; border-radius: 4px; border: 1px dashed #8e44ad; min-height: 40px; margin-top: 5px; font-size: 0.85em; color: #94a3b8;">
+                                </div>
+                            </div>
+                            <div class="shu-item"
+                                style="margin-top: 15px; border-top: 1px solid #8e44ad; padding-top: 10px;">
+                                <label>🔊 Mega Audio:</label>
+                                <audio id="audio-mega" controls style="width: 100%; margin-top: 5px;"></audio>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div> <!-- End col-left -->
+
+            <!-- Right: Queue Status & Project Settings -->
+            <div class="col-right">
+                <!-- Queue Status Table - IMPROVED -->
+                <div class="card queue-box" style="border-left: 4px solid #3498db;">
+                    <div class="queue-header"
+                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h2 style="margin: 0;">📊 Queue Status</h2>
+                        <span id="queueTotalLabel" class="queue-total"
+                            style="font-size: 0.8em; background: #2c3e50; padding: 2px 8px; border-radius: 10px;">Total:
+                            0 items</span>
+                    </div>
+                    <div class="queue-table-wrapper" style="overflow-x: auto;">
+                        <table class="queue-table-styled"
+                            style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                            <thead>
+                                <tr style="border-bottom: 2px solid #334155; text-align: left;">
+                                    <th style="padding: 8px;">Chương</th>
+                                    <th style="padding: 8px;">📸 Ảnh</th>
+                                    <th style="padding: 8px;">🎬 Video</th>
+                                    <th style="padding: 8px;">Trạng thái</th>
+                                </tr>
+                            </thead>
+                            <tbody id="queueTableBody">
+                                <tr class="placeholder-row">
+                                    <td colspan="4" style="padding: 15px; text-align: center; color: #64748b;">Chưa có
+                                        dữ liệu - Chạy Auto-Generate để bắt đầu</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- SHU Project Manager (Moved here) -->
+                <div class="card" id="module-project" style="margin-top: 15px; border-left: 4px solid #9b59b6;">
+                    <div class="card-header"
+                        style="display: flex; justify-content: space-between; align-items: center;">
+                        <h2>🌪️ SHU Project Manager</h2>
+                    </div>
+                    <div class="module-body">
+                        <div class="input-block">
+                            <label>📺 Kênh (Channel):</label>
+                            <div style="display: flex; gap: 5px;">
+                                <select id="shuChannelSelect" onchange="onChannelChange()"
+                                    style="flex: 1; background: #222;">
+                                    <option value="">-- Chọn Kênh --</option>
+                                </select>
+                                <button class="btn-secondary" onclick="openNewChannelModal()"
+                                    title="Tạo kênh mới">➕</button>
+                            </div>
+                        </div>
+
+                        <div class="input-block" style="margin-top: 10px;">
+                            <label>📁 Dự án (Project):</label>
+                            <div style="display: flex; gap: 5px;">
+                                <select id="shuProjectSelect" onchange="onProjectChange()"
+                                    style="flex: 1; background: #222;">
+                                    <option value="">-- Chọn Dự án --</option>
+                                </select>
+                                <button class="btn-secondary" onclick="openNewProjectModal()"
+                                    title="Tạo dự án mới">➕</button>
+                            </div>
+                        </div>
+
+                        <div class="input-row" style="margin-top: 15px; margin-bottom: 10px;">
+                            <label style="font-size: 0.85em; color: #aaa;">📂 Thư mục Output:</label>
+                            <div style="display: flex; gap: 5px; width: 100%;">
+                                <input type="text" id="outputDirectory" value="C:\Kênh\" placeholder="📂 C:\Kênh\"
+                                    style="flex: 1;">
+                                <button class="btn-secondary" onclick="selectNativeFolder()"
+                                    title="Mở hộp thoại chọn folder">📂</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ảnh Failed Panel - WITH CHAPTER TABS -->
+                <div class="card failed-box" id="module-failed-images" style="margin-top: 15px;">
+                    <div class="failed-header">
+                        <h3>❌ Ảnh Failed <span id="failedImageCount" class="failed-count">(0)</span></h3>
+                        <div class="failed-actions">
+                            <button class="btn-small" onclick="sortFailedImages()">📋 Sort</button>
+                            <button class="btn-small btn-warning" onclick="regenAllImages()">🔄 Regen All</button>
+                        </div>
+                    </div>
+                    <div class="failed-tabs" id="failedImageTabs">
+                        <!-- Tabs sẽ được tạo động -->
+                    </div>
+                    <div id="failedImagesList" class="failed-list">
+                        <p class="placeholder">Chưa có lỗi</p>
+                    </div>
+                </div>
+
+                <!-- Video Failed Panel - WITH CHAPTER TABS -->
+                <div class="card failed-box" id="module-failed-videos" style="margin-top: 15px;">
+                    <div class="failed-header">
+                        <h3>❌ Video Failed <span id="failedVideoCount" class="failed-count">(0)</span></h3>
+                        <div class="failed-actions">
+                            <button class="btn-small" onclick="sortFailedVideos()">📋 Sort</button>
+                            <button class="btn-small btn-warning" onclick="regenAllVideos()">🔄 Regen All</button>
+                        </div>
+                    </div>
+                    <div class="failed-tabs" id="failedVideoTabs">
+                        <!-- Tabs sẽ được tạo động -->
+                    </div>
+                    <div id="failedVideosList" class="failed-list">
+                        <p class="placeholder">Chưa có lỗi</p>
+                    </div>
+                </div>
+
+                <!-- Visual Prompts Panel (Always Visible) -->
+                <div class="card" id="chapterPromptsPanel" style="margin-top: 15px;">
+                    <h2>📝 Visual Prompts <span id="promptsCount" style="font-size: 0.8em; color: #888;"></span></h2>
+                    <div class="chapter-tabs" id="chapterTabs">
+                        <!-- Tabs sẽ được tạo động bởi JavaScript -->
+                    </div>
+                    <div class="chapter-content" id="chapterContent"
+                        style="max-height: 300px; overflow-y: auto; background: #0f172a; border-radius: 8px; padding: 15px; margin-top: 10px;">
+                        <p style="color: #666; text-align: center; font-size: 0.9em;">Chạy Auto-Generate để xem prompts
+                            tại đây</p>
+                    </div>
+                </div>
+
+            </div> <!-- End col-right -->
+
+        </div> <!-- End main-grid -->
+
+        <div class="floating-buttons">
+            <button id="btnManageProfiles" class="btn-floating btn-profile" onclick="openProfileManager()">📂 Style
+                &amp; Profile</button>
+            <button id="btnOpenApiSettings" class="btn-floating btn-api" onclick="openApiSettings()">⚙️ API
+                Keys</button>
+            <button id="btnManageLanes" class="btn-floating btn-lanes" onclick="openLaneManager()">🚗
+                Lanes</button>
+            <button id="btnOpenTestGen" class="btn-floating"
+                style="background: linear-gradient(135deg, #f39c12, #d35400);" onclick="openTestGenModal()">🧪 Test
+                Gen</button>
+        </div>
+
+        <!-- Test Gen Modal -->
+        <div id="testGenModal" class="modal-overlay hidden">
+            <div class="modal-content" style="width: 800px; max-width: 95vw;">
+                <div class="modal-header">
+                    <h3>🧪 Test Gen Bubble (Debug Mode)</h3>
+                    <button class="close-btn" onclick="closeTestGenModal()">×</button>
+                </div>
+                <div class="modal-body">
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                        <div style="flex: 1;">
+                            <label>Chọn Lane để Test:</label>
+                            <select id="testGenLaneSelect" style="width: 100%; background: #222;">
+                                <option value="">-- Loading... --</option>
+                            </select>
+                        </div>
+                        <div style="flex: 1;">
+                            <label>Generation Mode:</label>
+                            <select id="testGenModeSelect" style="width: 100%; background: #222;">
+                                <option value="api">🔌 API Mode (Fast)</option>
+                                <option value="manual">🖱️ Manual Chrome (Fallback)</option>
+                            </select>
+                        </div>
+                        <div style="width: 150px; display: flex; align-items: flex-end;">
+                            <button onclick="refreshTestGenLanes()" class="btn-secondary" style="width: 100%;">🔄
+                                Refresh</button>
+                        </div>
+                    </div>
+
+                    <div class="input-block">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                            <label>📸 Image Prompts (Mỗi dòng 1 prompt = 1 ảnh):</label>
+                            <button onclick="loadPromptsFromAnalysis()" class="btn-secondary"
+                                style="padding: 5px 12px; font-size: 0.85em; background: #3498db;">
+                                📥 Load từ Analysis
+                            </button>
+                        </div>
+                        <textarea id="testGenImagePrompts" rows="4" style="font-family: monospace;"
+                            placeholder="Nhập prompt ảnh ở đây hoặc bấm 'Load từ Analysis'...">
+</textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                        <div style="flex: 1;">
+                            <label style="font-size: 0.9em; color: #aaa;">Start Image ID (Optional):</label>
+                            <input type="text" id="testGenStartId" placeholder="Paste Media ID..."
+                                style="width: 100%; background: #222; border: 1px solid #444; padding: 8px; color: #fff; font-family: monospace;">
+                        </div>
+                        <div style="flex: 1;">
+                            <label style="font-size: 0.9em; color: #aaa;">End Image ID (Optional):</label>
+                            <input type="text" id="testGenEndId" placeholder="Paste Media ID..."
+                                style="width: 100%; background: #222; border: 1px solid #444; padding: 8px; color: #fff; font-family: monospace;">
+                        </div>
+                    </div>
+
+                    <!-- Mode Continue Checkbox REMOVED as per user request -->
+
+                    <div class="input-block">
+                        <label>🎬 Video Prompt (Action Bridge) [Optional]:</label>
+                        <textarea id="testGenVideoPrompt" rows="3" placeholder="Start... End...">Người chủ đưa cho cuộn len
+Lia camera đến con mèo đen
+Camera vòng quang 2 con mèo</textarea>
+                    </div>
+
+                    <button class="btn-primary" onclick="runTestGen()"
+                        style="background: linear-gradient(135deg, #f39c12, #d35400); width: 100%; margin: 10px 0; padding: 12px; font-size: 1.1em;">
+                        🚀 EXECUTE SHOWCASE
+                    </button>
+
+                    <!-- Test Log -->
+                    <div class="process-log" style="height: 350px;">
+                        <h4>🖥️ CMD Live Stream</h4>
+                        <div id="testGenCmdOutput" class="log-content"
+                            style="font-family: 'Consolas', monospace; font-size: 0.9em; line-height: 1.4;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lane Manager Modal -->
+        <div id="laneModal" class="modal-overlay hidden">
+            <div class="modal-content"
+                style="width: 900px; max-width: 95vw; resize: both; overflow: auto; min-width: 500px; min-height: 500px;">
+                <div class="modal-header">
+                    <h3>🚗 Lane Manager (Veo3 Accounts)</h3>
+                    <button class="close-btn" onclick="closeLaneManager()">×</button>
+                </div>
+                <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
+                    <!-- Lane List -->
+                    <div id="laneList" style="margin-bottom: 20px;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: rgba(255,255,255,0.1); text-align: left;">
+                                    <th style="padding: 8px; width: 15%;">Tên Lane</th>
+                                    <th style="padding: 8px; width: 25%;">IDs (Project/Scene)</th>
+                                    <th style="padding: 8px; width: 10%;">Trạng thái</th>
+                                    <th style="padding: 8px; width: 50%;">Hành động</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <td style="padding: 8px; font-weight: bold; vertical-align: top;">UltraA
+                                    </td>
+                                    <td style="padding: 8px; font-size: 0.8em; color: #aaa; vertical-align: top;">
+                                        <div>Prj: 259ce1...</div>
+                                        <div>Scn: 39566c...</div>
+                                    </td>
+                                    <td style="padding: 8px; vertical-align: top;">✅ Live</td>
+                                    <td style="padding: 8px;">
+                                        <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                                            <button onclick="launchChrome('UltraA')" class="lane-btn btn-launch"
+                                                title="Mở Chrome">🖥️</button>
+                                            <button onclick="captureToken('UltraA')" class="lane-btn btn-capture"
+                                                title="Bắt Token">🔑</button>
+                                            <button onclick="toggleLaneDetails(0)" class="lane-btn btn-launch"
+                                                style="background: #8e44ad;" title="Xem chi tiết">👁️ Chi tiết</button>
+                                            <button onclick="deleteLane('UltraA')" class="lane-btn btn-delete"
+                                                title="Xóa">🗑️</button>
+                                        </div>
+
+                                        <!-- Detail Box (Hidden by default) -->
+                                        <div id="lane-detail-0" class="hidden"
+                                            style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; margin-top: 5px;">
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Project
+                                                    ID:</label>
+                                                <input type="text" value="259ce1f3-ed69-47ad-9403-5caa7f845214"
+                                                    readonly="" onclick="this.select()"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #ccc; font-size: 0.8em; padding: 2px;">
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Scene
+                                                    ID:</label>
+                                                <input type="text" value="39566c3a-75ab-41bc-aaad-e4ec2bc61b1f"
+                                                    readonly="" onclick="this.select()"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #ccc; font-size: 0.8em; padding: 2px;">
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #f1c40f;">Authorization
+                                                    (Token):</label>
+                                                <textarea readonly="" onclick="this.select()" rows="2"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #f1c40f; font-size: 0.8em;"></textarea>
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #3498db;">Session
+                                                    Token:</label>
+                                                <textarea readonly="" onclick="this.select()" rows="2"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #3498db; font-size: 0.8em;"></textarea>
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Cookies:</label>
+                                                <textarea readonly="" onclick="this.select()" rows="3"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #aaa; font-size: 0.8em;"></textarea>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <td style="padding: 8px; font-weight: bold; vertical-align: top;">
+                                        BaoTong</td>
+                                    <td style="padding: 8px; font-size: 0.8em; color: #aaa; vertical-align: top;">
+                                        <div>Prj: 89db6c...</div>
+                                        <div>Scn: b9c56e...</div>
+                                    </td>
+                                    <td style="padding: 8px; vertical-align: top;">✅ Live</td>
+                                    <td style="padding: 8px;">
+                                        <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                                            <button onclick="launchChrome('BaoTong')" class="lane-btn btn-launch"
+                                                title="Mở Chrome">🖥️</button>
+                                            <button onclick="captureToken('BaoTong')" class="lane-btn btn-capture"
+                                                title="Bắt Token">🔑</button>
+                                            <button onclick="toggleLaneDetails(1)" class="lane-btn btn-launch"
+                                                style="background: #8e44ad;" title="Xem chi tiết">👁️ Chi tiết</button>
+                                            <button onclick="deleteLane('BaoTong')" class="lane-btn btn-delete"
+                                                title="Xóa">🗑️</button>
+                                        </div>
+
+                                        <!-- Detail Box (Hidden by default) -->
+                                        <div id="lane-detail-1" class="hidden"
+                                            style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; margin-top: 5px;">
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Project
+                                                    ID:</label>
+                                                <input type="text" value="89db6c2d-d55f-42d7-a6a4-1041388b27fb"
+                                                    readonly="" onclick="this.select()"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #ccc; font-size: 0.8em; padding: 2px;">
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Scene
+                                                    ID:</label>
+                                                <input type="text" value="b9c56ed3-1955-4793-8c09-7d270a98b341"
+                                                    readonly="" onclick="this.select()"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #ccc; font-size: 0.8em; padding: 2px;">
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #f1c40f;">Authorization
+                                                    (Token):</label>
+                                                <textarea readonly="" onclick="this.select()" rows="2"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #f1c40f; font-size: 0.8em;"></textarea>
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #3498db;">Session
+                                                    Token:</label>
+                                                <textarea readonly="" onclick="this.select()" rows="2"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #3498db; font-size: 0.8em;"></textarea>
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Cookies:</label>
+                                                <textarea readonly="" onclick="this.select()" rows="3"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #aaa; font-size: 0.8em;"></textarea>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <td style="padding: 8px; font-weight: bold; vertical-align: top;">
+                                        6thg123dyy 1</td>
+                                    <td style="padding: 8px; font-size: 0.8em; color: #aaa; vertical-align: top;">
+                                        <div>Prj: 5e291d...</div>
+                                        <div>Scn: 78429e...</div>
+                                    </td>
+                                    <td style="padding: 8px; vertical-align: top;">✅ Live</td>
+                                    <td style="padding: 8px;">
+                                        <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                                            <button onclick="launchChrome('6thg123dyy  1')" class="lane-btn btn-launch"
+                                                title="Mở Chrome">🖥️</button>
+                                            <button onclick="captureToken('6thg123dyy  1')" class="lane-btn btn-capture"
+                                                title="Bắt Token">🔑</button>
+                                            <button onclick="toggleLaneDetails(2)" class="lane-btn btn-launch"
+                                                style="background: #8e44ad;" title="Xem chi tiết">👁️ Chi tiết</button>
+                                            <button onclick="deleteLane('6thg123dyy  1')" class="lane-btn btn-delete"
+                                                title="Xóa">🗑️</button>
+                                        </div>
+
+                                        <!-- Detail Box (Hidden by default) -->
+                                        <div id="lane-detail-2" class="hidden"
+                                            style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; margin-top: 5px;">
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Project
+                                                    ID:</label>
+                                                <input type="text" value="5e291d5e-fbab-4703-8769-cd490afdd79d"
+                                                    readonly="" onclick="this.select()"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #ccc; font-size: 0.8em; padding: 2px;">
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Scene
+                                                    ID:</label>
+                                                <input type="text" value="78429e1d-73e1-4b25-9a51-88c29bbfb40f"
+                                                    readonly="" onclick="this.select()"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #ccc; font-size: 0.8em; padding: 2px;">
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #f1c40f;">Authorization
+                                                    (Token):</label>
+                                                <textarea readonly="" onclick="this.select()" rows="2"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #f1c40f; font-size: 0.8em;"></textarea>
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #3498db;">Session
+                                                    Token:</label>
+                                                <textarea readonly="" onclick="this.select()" rows="2"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #3498db; font-size: 0.8em;"></textarea>
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Cookies:</label>
+                                                <textarea readonly="" onclick="this.select()" rows="3"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #aaa; font-size: 0.8em;"></textarea>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <td style="padding: 8px; font-weight: bold; vertical-align: top;">
+                                        6thg123dyy4rf@lyntra.io.vn</td>
+                                    <td style="padding: 8px; font-size: 0.8em; color: #aaa; vertical-align: top;">
+                                        <div>Prj: 69fe52...</div>
+                                        <div>Scn: 7ceae8...</div>
+                                    </td>
+                                    <td style="padding: 8px; vertical-align: top;">✅ Live</td>
+                                    <td style="padding: 8px;">
+                                        <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                                            <button onclick="launchChrome('6thg123dyy4rf@lyntra.io.vn')"
+                                                class="lane-btn btn-launch" title="Mở Chrome">🖥️</button>
+                                            <button onclick="captureToken('6thg123dyy4rf@lyntra.io.vn')"
+                                                class="lane-btn btn-capture" title="Bắt Token">🔑</button>
+                                            <button onclick="toggleLaneDetails(3)" class="lane-btn btn-launch"
+                                                style="background: #8e44ad;" title="Xem chi tiết">👁️ Chi tiết</button>
+                                            <button onclick="deleteLane('6thg123dyy4rf@lyntra.io.vn')"
+                                                class="lane-btn btn-delete" title="Xóa">🗑️</button>
+                                        </div>
+
+                                        <!-- Detail Box (Hidden by default) -->
+                                        <div id="lane-detail-3" class="hidden"
+                                            style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 4px; margin-top: 5px;">
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Project
+                                                    ID:</label>
+                                                <input type="text" value="69fe52ff-d83c-4a4a-bdeb-fc36af2082a6"
+                                                    readonly="" onclick="this.select()"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #ccc; font-size: 0.8em; padding: 2px;">
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Scene
+                                                    ID:</label>
+                                                <input type="text" value="7ceae898-a6dc-439a-9cc2-5ba4f8cbc425"
+                                                    readonly="" onclick="this.select()"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #ccc; font-size: 0.8em; padding: 2px;">
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #f1c40f;">Authorization
+                                                    (Token):</label>
+                                                <textarea readonly="" onclick="this.select()" rows="2"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #f1c40f; font-size: 0.8em;"></textarea>
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #3498db;">Session
+                                                    Token:</label>
+                                                <textarea readonly="" onclick="this.select()" rows="2"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #3498db; font-size: 0.8em;"></textarea>
+                                            </div>
+                                            <div class="input-block-sm">
+                                                <label style="font-size: 0.7em; color: #aaa;">Cookies:</label>
+                                                <textarea readonly="" onclick="this.select()" rows="3"
+                                                    style="width: 100%; background: #222; border: 1px solid #444; color: #aaa; font-size: 0.8em;"></textarea>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+
+                            </tbody>
+                        </table>
+                        <p style="color: #888; font-size: 0.85em; margin-top: 10px;">📊 Tổng: 4 lanes</p>
+
+                    </div>
+                </div>
+
+                <!-- Add/Edit Lane Form -->
+                <fieldset class="config-group" style="margin-top: 15px;">
+                    <legend>➕ Thêm Lane</legend>
+                    <div class="input-block">
+                        <label>Tên Lane:</label>
+                        <input type="text" id="laneNameInput" placeholder="VD: Account1">
+                    </div>
+                    <div class="input-block">
+                        <label>Project ID:</label>
+                        <input type="text" id="laneProjectId" placeholder="UUID từ Flow">
+                    </div>
+                    <div class="input-block">
+                        <label>Scene ID:</label>
+                        <input type="text" id="laneSceneId" placeholder="UUID từ Flow">
+                    </div>
+                    <div class="input-block">
+                        <label>Proxy (tuỳ chọn):</label>
+                        <input type="text" id="laneProxy" placeholder="host:port:user:pass">
+                    </div>
+                    <button class="btn-success" onclick="saveLane()" style="margin-top: 10px;">💾 Lưu
+                        Lane</button>
+                </fieldset>
+            </div>
+        </div>
+    </div>
+
+    <div id="profileModal" class="modal-overlay hidden">
+        <div class="modal-content profile-modal">
+            <div class="modal-header">
+                <h3>🎨 Studio Cấu Hình Profile</h3>
+                <div class="header-actions">
+                    <select id="profileSelector" class="profile-dropdown">
+                        <option value="new">+ Tạo mới...</option>
+                        <option value="profile_void_silence">Thiên văn học - Ngủ (Void Silence)</option>
+                        <option value="sk-ax4l5i04uzaeibrby86ln03mgdce1mi5w61aalvmg8az3yg">
+                            sk_ax4l5i04uzaeibrby86ln03mgdce1mi5w61aalvmg8az3yg1</option>
+                        <option value="voidcharse">VoidCharse</option>
+                    </select>
+                    <button id="btnCloseProfile" class="close-btn">×</button>
+                </div>
+            </div>
+
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Tên Profile (Ngách):</label>
+                    <input type="text" id="profileName" placeholder="VD: Thiên văn học - Ngủ (Void Silence)...">
+                </div>
+
+                <!-- Tabs -->
+                <div class="tabs-nav">
+                    <button class="tab-btn active" data-tab="tab-script">🎙️ Voice/Script</button>
+                    <button class="tab-btn" data-tab="tab-visual">🎬 Visual</button>
+                    <button class="tab-btn" data-tab="tab-metadata">📝 Metadata</button>
+
+                </div>
+
+                <!-- Tab 1: Script Style -->
+                <div id="tab-script" class="tab-content active">
+                    <div class="input-block">
+                        <label>🔑 Bộ Từ Khóa Ngách</label>
+                        <input type="text" id="rawKeywords" placeholder="VD: strange signal; #NASA, james webb...">
+                        <div id="keywordTags" class="tags-container"></div>
+                        <small class="hint-text">Phân cách bằng dấu phẩy, chấm phẩy hoặc #</small>
+                    </div>
+
+                    <div class="input-block">
+                        <label>✍️ Chỉ dẫn Phong Cách &amp; Tone Giọng</label>
+                        <div class="ai-input-group">
+                            <textarea id="toneInstruction" rows="4"
+                                placeholder="Mô tả ngắn: Giọng hài hước, châm biếm..."></textarea>
+                            <button id="btnAiSuggestStyle" class="btn-ai-magic">✨ AI Đề Xuất</button>
+                        </div>
+                    </div>
+
+                    <div class="input-block">
+                        <label> Nạp Tài Liệu Mẫu (Học văn phong)</label>
+                        <div class="file-upload-zone" id="dropZone">
+                            <p>Kéo thả file .docx, .txt, .xlsx vào đây<br>hoặc <span>Bấm để chọn</span></p>
+                            <input type="file" id="styleFileUpload" accept=".docx,.txt,.xlsx" hidden="">
+                        </div>
+                        <div id="fileAnalysisResult" class="analysis-box hidden">
+                            <h4>🧠 AI đã rút trích luật từ tài liệu:</h4>
+                            <textarea id="extractedRules" rows="5"></textarea>
+                            <button id="btnApplyRules" class="btn-sm">Áp dụng vào Prompt</button>
+                        </div>
+                    </div>
+
+                    <div class="input-block">
+                        <label>🎭 Vai trò Biên kịch (Writing Role):</label>
+                        <div class="flex-row gap-10">
+                            <select id="writingRoleTemplate" class="flex-1"
+                                onchange="applyRuleTemplate('writingRole', this.value)">
+                                <option value="">-- Mẫu có sẵn --</option>
+                                <option value="astronomy">Tài liệu Thiên văn (Astronomy)</option>
+                                <option value="mystery">Bí ẩn/Kỳ quái (Mystery/Creepy)</option>
+                                <option value="storyteller">Kể chuyện Truyền cảm hứng (Storyteller)</option>
+                                <option value="reviewer">Reviewer Sản phẩm (Product Review)</option>
+                            </select>
+                            <button type="button" class="btn-sm btn-secondary" onclick="suggestRulesWithAI('writing')">✨
+                                AI Đề Xuất</button>
+                        </div>
+                        <textarea id="writingRole" rows="3"
+                            placeholder="VD: Bạn là một biên kịch chuyên về tài liệu khoa học..."></textarea>
+                        <small class="hint-text">Định hình phong cách viết của AI cho kịch bản.</small>
+                    </div>
+
+                    <!-- NEW: SCRIPT STRUCTURE RULES -->
+                    <div class="input-block">
+                        <label>🏗️ Quy tắc Cấu Trúc Kịch Bản (Structure Rules)</label>
+                        <textarea id="scriptStructureRules" rows="6"
+                            placeholder="Nhập luật cấu trúc custom (VD: Hook 0-12s, Body chia 3 đoạn, chèn Keyword sau 90s...). Để trống sẽ dùng luật mặc định."></textarea>
+
+                        <div class="file-upload-zone-sm" id="structureDropZone" style="margin-top: 5px;">
+                            <p><span id="structureRulesStatus">Kéo thả file LUAT_CAU_TRUC.txt vào đây để học</span></p>
+                            <input type="file" id="structureRulesUpload" accept=".txt,.docx" hidden="">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Visual Rules (COMPLETE) -->
+                <div id="tab-visual" class="tab-content">
+
+                    <!-- Fieldset 1: Art Style -->
+                    <fieldset class="config-group">
+                        <legend>🎨 Art Style &amp; Chất liệu hình ảnh</legend>
+                        <div class="input-block">
+                            <div class="flex-row-between">
+                                <label>Preset nhanh:</label>
+                                <select id="visualPreset" class="preset-dropdown-sm">
+                                    <option value="">-- Chọn Style --</option>
+                                    <option value="cinematic">Cinematic (Phim điện ảnh)</option>
+                                    <option value="documentary">National Geographic (Tài liệu)</option>
+                                    <option value="anime">Anime (Makoto Shinkai)</option>
+                                    <option value="3d_render">3D Unreal Engine 5</option>
+                                    <option value="vintage">Vintage 90s VHS</option>
+                                </select>
+                            </div>
+                            <div class="ai-input-group">
+                                <textarea id="visualStylePrompt" rows="3"
+                                    placeholder="Mô tả style: Cinematic lighting, hyper-realistic, 8k, moody atmosphere..."></textarea>
+                                <button id="btnAiEnhanceVisual" class="btn-ai-magic">✨ Tối ưu</button>
+                            </div>
+                            <small class="hint-text">Base Prompt sẽ được cộng dồn vào TẤT CẢ các
+                                ảnh.</small>
+                        </div>
+                    </fieldset>
+
+                    <!-- Fieldset 2: Camera & Duration -->
+                    <fieldset class="config-group">
+                        <legend>🎬 Cấu hình Dựng Phim</legend>
+                        <div class="grid-2-col">
+                            <div class="input-block">
+                                <label>📐 Tỉ lệ khung hình:</label>
+                                <select id="aspectRatio">
+                                    <option value="16:9" selected="">16:9 (YouTube Ngang)</option>
+                                    <option value="9:16">9:16 (Shorts/TikTok)</option>
+                                    <option value="1:1">1:1 (Square)</option>
+                                    <option value="21:9">21:9 (Ultrawide Cinema)</option>
+                                </select>
+                            </div>
+                            <div class="input-block">
+                                <label>📝 Định dạng Prompt (Format):</label>
+                                <select id="promptFormat">
+                                    <option value="text">Dòng đơn (Standard)</option>
+                                    <option value="json">Cấu trúc JSON (Advanced)</option>
+                                </select>
+                            </div>
+                            <div class="input-block">
+                                <label>📷 Góc nhìn chủ đạo:</label>
+                                <select id="cameraAngle">
+                                    <option value="cinematic">Cinematic (Điện ảnh, đa dạng)</option>
+                                    <option value="documentary">Documentary (Thực tế)</option>
+                                    <option value="orbital">Orbital (Từ vũ trụ nhìn xuống)</option>
+                                    <option value="microscopic">Microscopic (Soi chi tiết)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid-2-col">
+                            <div class="input-block">
+                                <label>⏱️ Thời lượng 1 Scene (Giây):</label>
+                                <input type="number" id="sceneDuration" value="8" min="2" max="20">
+                            </div>
+                            <div class="input-block">
+                                <label>🔗 Quy tắc Ghép Ảnh (Mapping):</label>
+                                <select id="mappingMode">
+                                    <option value="1:1">1 Ảnh -> 1 Video (Tiết kiệm, nhanh)</option>
+                                    <option value="N+1" selected>N+1 Ảnh -> N Video (Mượt, nghệ thuật)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <!-- Fieldset 3: Consistency Lock -->
+                    <fieldset class="config-group">
+                        <legend>🔐 Khóa Đối Tượng (Consistency)</legend>
+                        <div class="input-block">
+                            <label>Mã màu &amp; Vật liệu:</label>
+                            <textarea id="objectConsistency" rows="3"
+                                placeholder="VD: The Giant = Monolith đen tuyền (RGB 0,0,0); Tín hiệu = Đỏ (RGB 255,0,0)..."></textarea>
+                            <small class="hint-text">Giúp AI không "quên" màu sắc/hình dáng giữa các cảnh.</small>
+                        </div>
+                    </fieldset>
+
+                    <!-- NEW: MODULAR RULES -->
+                    <fieldset class="config-group">
+                        <legend>🛠️ Implicit Rules Migration (Luật Ngầm)</legend>
+                        <div class="input-block">
+                            <label>🎨 Nguyên tắc Đạo diễn (Directorial Principles):</label>
+                            <div class="flex-row gap-10">
+                                <select id="skeletonPrinciplesTemplate" class="flex-1"
+                                    onchange="applyRuleTemplate('skeletonPrinciples', this.value)">
+                                    <option value="">-- Mẫu có sẵn --</option>
+                                    <option value="documentary">Tài liệu Khoa học (Astronomy)</option>
+                                    <option value="horror">Kinh dị/Bí ẩn (Mystery)</option>
+                                    <option value="action">Hành động/Kịch tính (Action)</option>
+                                    <option value="meditation">Thiền định/Chữa lành (Peaceful)</option>
+                                </select>
+                                <button type="button" class="btn-sm btn-secondary"
+                                    onclick="suggestRulesWithAI('skeleton')">✨ AI Đề Xuất</button>
+                            </div>
+                            <textarea id="skeletonPrinciples" rows="4"
+                                placeholder="Chỉ dẫn cho Skeleton generation..."></textarea>
+                        </div>
+                        <div class="input-block">
+                            <label>✅ Quy tắc Kiểm duyệt (Verification Rules):</label>
+                            <div class="flex-row gap-10">
+                                <select id="verificationRulesTemplate" class="flex-1"
+                                    onchange="applyRuleTemplate('verificationRules', this.value)">
+                                    <option value="">-- Mẫu có sẵn --</option>
+                                    <option value="strict">Kiểm duyệt Nghiêm ngặt (No Humans, No Fantasy)</option>
+                                    <option value="creative">Sáng tạo Tự do (Fantasy OK)</option>
+                                    <option value="hologram">Ưu tiên Hologram & Data (Science HUD)</option>
+                                </select>
+                                <button type="button" class="btn-sm btn-secondary"
+                                    onclick="suggestRulesWithAI('verification')">✨ AI Đề Xuất</button>
+                            </div>
+                            <textarea id="verificationRules" rows="4"
+                                placeholder="Chỉ dẫn khi soát Prompt..."></textarea>
+                        </div>
+                    </fieldset>
+
+                    <!-- Fieldset 4: Image Rules -->
+                    <fieldset class="config-group">
+                        <legend>📸 Luật Tạo Prompt Ảnh (Image Rules)</legend>
+                        <div class="input-block">
+                            <div class="file-upload-zone-sm" id="imageRulesDropZone">
+                                <p><span id="imageRulesStatus">Kéo thả file LUAT_ANH.txt vào đây</span></p>
+                                <input type="file" id="imageRulesUpload" accept=".txt,.docx" hidden="">
+                            </div>
+                            <textarea id="imageRulesText" rows="4"
+                                placeholder="Luật về style, ánh sáng, màu sắc, camera, negative prompt..."></textarea>
+                            <small class="hint-text">Áp dụng khi AI gen Image Prompt.</small>
+                        </div>
+                    </fieldset>
+
+                    <!-- Fieldset 5: Video Rules -->
+                    <fieldset class="config-group">
+                        <legend>🎬 Luật Tạo Prompt Video (Video Rules)</legend>
+                        <div class="input-block">
+                            <div class="file-upload-zone-sm" id="videoRulesDropZone">
+                                <p><span id="videoRulesStatus">Kéo thả file LUAT_VIDEO.txt vào đây</span></p>
+                                <input type="file" id="videoRulesUpload" accept=".txt,.docx" hidden="">
+                            </div>
+                            <textarea id="videoRulesText" rows="4"
+                                placeholder="Luật về chuyển động camera (pan, zoom, dolly), hành động, transitions..."></textarea>
+                            <small class="hint-text">Áp dụng khi AI gen Video Prompt (Action Bridge).</small>
+                        </div>
+                    </fieldset>
+
+                    <!-- Fieldset 6: Thumbnail Config -->
+                    <fieldset class="config-group">
+                        <legend>🖼️ Thumbnail &amp; Metadata</legend>
+                        <div class="input-block">
+                            <label>Công thức Title/Thumb (SHU Formula):</label>
+                            <textarea id="thumbRules" rows="2"
+                                placeholder="VD: Mũi tên đỏ, Text in hoa 'IT'S HAPPENING', Flare vàng..."></textarea>
+                        </div>
+                    </fieldset>
+
+                </div>
+
+                <!-- Tab 3: Metadata Rules (Title, Description, Thumbnail) -->
+                <div id="tab-metadata" class="tab-content">
+
+                    <fieldset class="config-group">
+                        <legend>🏷️ Title Rules (SHU Formula)</legend>
+                        <div class="input-block">
+                            <label>Công thức viết Title:</label>
+                            <textarea id="titleRules" rows="3" placeholder="Formula: [Keyword] + [Action Verb] + [Emotion/Time]
+VD: Voyager 2 Just Sent a Terrifying Signal 5 Minutes Ago
+Action verbs: Just, Detected, Confirmed, Revealed"></textarea>
+                            <small class="hint-text">AI sẽ tạo 3 biến thể để A/B test</small>
+                        </div>
+                        <div class="input-block">
+                            <label>CTR Phrases (ngăn cách bằng dấu phẩy):</label>
+                            <input type="text" id="ctrPhrases"
+                                placeholder="IT'S HAPPENING, 5 MINUTES AGO, SCIENTISTS IN SHOCK, BREAKING NEWS">
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="config-group">
+                        <legend>📄 Description Rules</legend>
+                        <div class="input-block">
+                            <label>Cấu trúc mô tả:</label>
+                            <textarea id="descriptionRules" rows="4" placeholder="200-350 từ:
+- 2-3 câu đầu: keyword chính
+- 3-4 câu: supporting keywords
+- Timestamps + CTA + Sources
+- 10-15 hashtags"></textarea>
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="config-group">
+                        <legend>🎨 Thumbnail Prompt Rules</legend>
+                        <div class="input-block">
+                            <label>Template prompt:</label>
+                            <textarea id="thumbnailRules" rows="3"
+                                placeholder="Focal object large, red arrow pointing to core, golden flare, cinematic 16:9, bold text 'CTR PHRASE', NASA style, no human faces --ar 16:9"></textarea>
+                        </div>
+                        <div class="grid-2-col">
+                            <div class="input-block">
+                                <label>Text mặc định:</label>
+                                <input type="text" id="defaultThumbText" placeholder="IT'S HAPPENING">
+                            </div>
+                            <div class="input-block">
+                                <label>Style mặc định:</label>
+                                <select id="thumbStyle">
+                                    <option value="cinematic_space">Cinematic Space (NASA)</option>
+                                    <option value="breaking_news">Breaking News (Red bar)</option>
+                                    <option value="documentary">Documentary</option>
+                                    <option value="minimal">Minimal Art</option>
+                                </select>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="config-group">
+                        <legend>📁 Nạp File Mẫu Metadata</legend>
+                        <div class="input-block">
+                            <div class="file-upload-zone-sm" id="metadataDropZone">
+                                <p><span id="metadataRulesStatus">Kéo thả file mẫu Title/Description vào
+                                        đây</span></p>
+                                <input type="file" id="metadataRulesUpload" accept=".txt,.docx,.csv" hidden="">
+                            </div>
+                            <div id="metadataRulesResult" class="analysis-box hidden">
+                                <h4>📜 Luật Metadata đã trích xuất:</h4>
+                                <textarea id="metadataLogicRules" rows="4"></textarea>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                </div>
+
+                <!-- Tab 4: Voice/TTS Settings -->
+                <div id="tab-voice" class="tab-content">
+
+                    <fieldset class="config-group">
+                        <legend>🎤 Cấu hình Giọng Đọc (AI33 / ElevenLabs)</legend>
+
+                        <div class="input-block">
+                            <label>API Key (xi-api-key):</label>
+                            <input type="password" id="voiceApiKey" placeholder="Nhập Key AI33/ElevenLabs...">
+                        </div>
+
+                        <div class="grid-2-col">
+                            <div class="input-block">
+                                <label>Voice ID:</label>
+                                <input type="text" id="voiceId" placeholder="VD: ErXwobaYiN019PkySvjV">
+                            </div>
+                            <div class="input-block">
+                                <label>Model:</label>
+                                <select id="voiceModel">
+                                    <option value="eleven_multilingual_v2">Multilingual V2 (Best for
+                                        Vietnamese)
+                                    </option>
+                                    <option value="eleven_turbo_v2_5">Turbo V2.5 (Fast)</option>
+                                    <option value="eleven_flash_v2_5">Flash V2.5 (Fastest)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <small class="hint-text">⚠️ AI33 API:
+                            <code>https://api.ai33.pro/v1/text-to-speech</code></small>
+                    </fieldset>
+
+                    <!-- NEW: VOICE LOGIC RULES -->
+                    <fieldset class="config-group">
+                        <legend>🗣️ Quy tắc Đọc & Xử lý Âm thanh (Audio Rules)</legend>
+                        <div class="input-block">
+                            <label>Luật xử lý Voice (Prosody, Pauses):</label>
+                            <textarea id="voiceLogicRules" rows="4" placeholder="VD:
+- Hook đọc nhanh, dồn dập.
+- Chèn 0.5s pause trước mỗi Cliffhanger.
+- Nhắc lại Keyword ở Hook, Body, Climax."></textarea>
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="config-group">
+                        <legend>⚙️ Cấu hình Visual Pipeline</legend>
+                        <div class="grid-2-col">
+                            <div class="input-block">
+                                <label>Scene Duration (giây):</label>
+                                <input type="number" id="pipelineSceneDuration" value="8" min="4" max="15">
+                                <small class="hint-text">Veo chuẩn: 8s/scene</small>
+                            </div>
+                            <div class="input-block">
+                                <label>Auto-gen Visual:</label>
+                                <select id="autoGenVisual">
+                                    <option value="true">Bật (Gen prompt sau khi có duration)</option>
+                                    <option value="false">Tắt (Chỉ tạo voice)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </fieldset>
+
+                    <fieldset class="config-group">
+                        <legend>📂 Output Directory</legend>
+                        <div class="input-block">
+                            <label>Thư mục lưu file:</label>
+                            <input type="text" id="outputDir" value="output_files"
+                                placeholder="Đường dẫn thư mục output">
+                        </div>
+                    </fieldset>
+
+                </div>
+                <div class="modal-footer">
+                    <button id="btnDeleteProfile" class="btn-danger">🗑️ Xóa Profile</button>
+                    <button id="btnCopyProfile" class="btn-info">📋 Sao chép Profile</button>
+                    <button id="btnSaveProfile" class="btn-success">💾 Lưu Cấu Hình</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GenAI Voice Browser Modal -->
+    <div id="genai-voice-browser" class="modal-overlay hidden">
+        <div class="modal-content" style="max-width:600px;">
+            <div class="modal-header">
+                <h3>🔍 GenAI Voice Library</h3>
+                <button class="close-btn" onclick="closeVoiceBrowser()">×</button>
+            </div>
+            <div class="modal-body">
+                <div style="display:flex; gap:10px; margin-bottom:15px;">
+                    <select id="genai-browse-language"
+                        style="flex:1; padding:8px; background:#1a1a2e; border:1px solid #444; color:#fff; border-radius:4px;">
+                        <option value="">All Languages</option>
+                        <option value="vi">Vietnamese</option>
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="ja">Japanese</option>
+                        <option value="ko">Korean</option>
+                        <option value="zh">Chinese</option>
+                    </select>
+                    <select id="genai-browse-gender"
+                        style="flex:1; padding:8px; background:#1a1a2e; border:1px solid #444; color:#fff; border-radius:4px;">
+                        <option value="">All Genders</option>
+                        <option value="female">Female</option>
+                        <option value="male">Male</option>
+                    </select>
+                    <button onclick="browseGenAIVoices()"
+                        style="padding:8px 15px; background:#3498db; border:none; color:#fff; border-radius:4px; cursor:pointer;">
+                        🔍 Search
+                    </button>
+                </div>
+                <div id="genai-browse-list" style="max-height:400px; overflow-y:auto;">
+                    <!-- Voice list will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- API Settings Modal -->
+    <div id="apiSettingsModal" class="modal-overlay hidden">
+        <div class="modal-content api-modal">
+            <div class="modal-header">
+                <h3>🔑 Quản lý API Key Gemini</h3>
+                <button id="btnCloseApiSettings" class="close-btn">×</button>
+            </div>
+
+            <div class="modal-body">
+                <!-- Gemini Keys -->
+                <div class="add-key-section" style="margin-bottom: 20px;">
+                    <label
+                        style="font-size: 0.9em; color: #3498db; display: block; margin-bottom: 8px; font-weight: bold;">
+                        📋 Danh sách API Keys (Dán đè để cập nhật):
+                    </label>
+                    <textarea id="bulkGeminiKeysTextarea" rows="10"
+                        placeholder="Dán danh sách API Keys vào đây, mỗi dòng một key...&#10;AIzaSy...&#10;AIzaSy..."
+                        style="width: 100%; background: #0f172a; border: 1px solid #3366ff; color: #fff; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; resize: vertical; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);"></textarea>
+                    <p style="font-size: 0.75em; color: #888; margin-top: 5px; font-style: italic;">
+                        * Toàn bộ danh sách cũ sẽ bị thay thế bằng nội dung trong khung này khi bấm Lưu.
+                    </p>
+                </div>
+
+                <div class="key-list-container">
+                    <ul id="keyList"></ul>
+                </div>
+
+                <div class="modal-footer-stats">
+                    <span id="keyCountLabel">0 Keys</span>
+                    <button id="btnTestAll" class="btn-warning">⚡ Test Tất Cả</button>
+                    <button id="btnSaveKeys" class="btn-success">💾 Lưu Cấu Hình</button>
+                </div>
+
+                <!-- 2Captcha Config -->
+                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #444;">
+                    <h4 style="color: #3498db; margin-bottom: 10px;">🧩 2Captcha Config (Required for Flow)</h4>
+                    <p style="font-size: 0.85em; color: #888; margin-bottom: 10px;">
+                        API Key dùng để giải reCAPTCHA Enterprise tự động khi tạo ảnh/video.
+                    </p>
+                    <input type="text" id="twoCaptchaKey" placeholder="Paste 2Captcha API Key..."
+                        style="width: 100%; background: #1a1a2e; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 4px; font-family: monospace;">
+                </div>
+
+                <!-- Audio Analysis Keys Section -->
+                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #444;">
+                    <h4 style="color: #f39c12; margin-bottom: 10px;">🎧 Keys Nghe Audio (Ưu tiên)</h4>
+                    <p style="font-size: 0.85em; color: #888; margin-bottom: 10px;">
+                        Keys dùng cho phân tích audio với model <strong
+                            id="audioModelDisplay">gemini-2.5-flash</strong>.
+                        Mỗi key dùng tối đa <strong id="audioLimitDisplay">20</strong> lần/ngày.
+                    </p>
+
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <div style="flex: 1;">
+                            <label style="font-size: 0.8em; color: #aaa;">Model:</label>
+                            <input type="text" id="audioModelInput" value="gemini-2.5-flash"
+                                placeholder="gemini-2.5-flash"
+                                style="width: 100%; background: #1a1a2e; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 4px;">
+                        </div>
+                        <div style="width: 100px;">
+                            <label style="font-size: 0.8em; color: #aaa;">Giới hạn/ngày:</label>
+                            <input type="number" id="audioLimitInput" value="20" min="1" max="1000"
+                                style="width: 100%; background: #1a1a2e; border: 1px solid #444; color: #fff; padding: 8px; border-radius: 4px;">
+                        </div>
+                        <div style="display: flex; align-items: flex-end;">
+                            <button onclick="updateAudioSettings()" class="btn-primary" style="padding: 8px 15px;">🔄
+                                Update</button>
+                        </div>
+                    </div>
+
+                    <textarea id="audioKeysTextarea" rows="4"
+                        placeholder="Dán API Keys ở đây (mỗi dòng 1 key)&#10;AIzaSy...&#10;AIzaSy..."
+                        style="width: 100%; background: #1a1a2e; border: 1px solid #f39c12; color: #fff; padding: 10px; border-radius: 4px; font-family: monospace; resize: vertical;"></textarea>
+
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+                        <span id="audioKeysStats" style="color: #888; font-size: 0.85em;">0 keys | 0 còn khả
+                            dụng</span>
+                        <button onclick="saveAudioKeys()" class="btn-success" style="padding: 8px 20px;">💾 Lưu
+                            Audio
+                            Keys</button>
+                    </div>
+
+                    <!-- Usage Stats -->
+                    <div id="audioUsageList" style="margin-top: 10px; max-height: 150px; overflow-y: auto;">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Project Modal -->
+    <div id="newProjectModal" class="modal-overlay hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>🆕 Tạo Dự Án Mới</h3>
+                <button class="close-btn" onclick="closeNewProjectModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-block">
+                    <label>Tên Dự Án:</label>
+                    <input type="text" id="newProjectName" placeholder="VD: Bão Mặt Trời - Tập 1">
+                </div>
+                <div class="input-block" style="margin-top: 10px;">
+                    <label>Mô tả (Tùy chọn):</label>
+                    <textarea id="newProjectDesc" rows="2" placeholder="Ghi chú ngắn về dự án..."></textarea>
+                </div>
+                <button class="btn-success" onclick="createNewProject()" style="width: 100%; margin-top: 15px;">🚀 Khởi
+                    Tạo Dự Án</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Channel Modal -->
+    <div id="newChannelModal" class="modal-overlay hidden">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>📺 Tạo Kênh Mới</h3>
+                <button class="close-btn" onclick="closeNewChannelModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="input-block">
+                    <label>Tên Kênh:</label>
+                    <input type="text" id="newChannelName" placeholder="VD: NASA Breaking News">
+                </div>
+                <div class="input-block" style="margin-top: 10px;">
+                    <label>Niche (Ngách):</label>
+                    <input type="text" id="newChannelNiche" placeholder="VD: NASA_BREAKING">
+                </div>
+                <div class="input-block" style="margin-top: 10px;">
+                    <label>Ngôn ngữ:</label>
+                    <input type="text" id="newChannelLang" value="Vietnamese" placeholder="VD: Vietnamese">
+                </div>
+                <button class="btn-success" onclick="createNewChannel()" style="width: 100%; margin-top: 15px;">🚀 Tạo
+                    Kênh Mới</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="hidden"></div>
+    </div> <!-- End container -->
+
+
+    <script src="js/queueUi.js"></script>
+
+    <style>
+        /* Queue UI Styles */
+        .queue-stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .q-stat {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .q-val {
+            display: block;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        .q-label {
+            font-size: 12px;
+            color: #aaa;
+            text-transform: uppercase;
+        }
+
+        .text-blue {
+            color: #3498db;
+        }
+
+        .text-orange {
+            color: #f39c12;
+        }
+
+        .text-red {
+            color: #e74c3c;
+        }
+
+        .text-green {
+            color: #2ecc71;
+        }
+
+        .failed-items-container {
+            max-height: 300px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .failed-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(231, 76, 60, 0.1);
+            border: 1px solid #e74c3c;
+            padding: 8px 12px;
+            border-radius: 6px;
+        }
+
+        .failed-info {
+            display: flex;
+            flex-direction: column;
+            font-size: 0.9em;
+        }
+
+        .failed-info strong {
+            color: #e74c3c;
+        }
+
+        .error-msg {
+            font-size: 0.8em;
+            color: #ccc;
+            margin-top: 2px;
+        }
+
+        .btn-retry {
+            background: none;
+            border: 1px solid #aaa;
+            color: #fff;
+            border-radius: 4px;
+            cursor: pointer;
+            padding: 4px 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-retry:hover {
+            background: #fff;
+            color: #000;
+        }
+
+        /* Lane Manager Buttons */
+        .lane-btn {
+            padding: 4px 8px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 4px;
+            font-size: 14px;
+        }
+
+        .btn-launch {
+            background: #3498db;
+            color: white;
+        }
+
+        .btn-capture {
+            background: #f1c40f;
+            color: black;
+        }
+
+        .btn-delete {
+            background: #e74c3c;
+            color: white;
+        }
+    </style>
+
+    <!-- Project Folder Functions -->
+    <script>
+        // Update project path display on input
+        function updateProjectPath() {
+            const projectName = document.getElementById('projectName').value.trim();
+            const outputDir = document.getElementById('outputDirectory').value.trim();
+            const outputPath = document.getElementById('outputPath');
+
+            if (projectName) {
+                const safeName = projectName.replace(/[<>:"/\\|?*]/g, '_');
+                outputPath.textContent = `${outputDir}\\${safeName}`;
+            } else {
+                outputPath.textContent = `${outputDir}\\[Tên Project]`;
+            }
+        }
+
+        // Prompt for folder selection (browser limitation - can only open folder dialog via input)
+        function selectOutputFolder() {
+            const newPath = prompt('Nhập đường dẫn thư mục Output:', document.getElementById('outputDirectory').value);
+            if (newPath && newPath.trim()) {
+                updateProjectPath();
+            }
+        }
+
+        // Open NATIVE folder picker via Server
+        async function selectNativeFolder() {
+            const btn = document.querySelector('button[title="Mở hộp thoại chọn folder"]');
+            const originalIcon = btn.innerHTML;
+            btn.innerHTML = '⏳';
+            btn.disabled = true;
+
+            try {
+                showToast('📂 Đang mở cửa sổ chọn folder...', 'info');
+                const response = await fetch('/api/select-folder');
+                const data = await response.json();
+
+                if (data.success && data.path) {
+                    document.getElementById('outputDirectory').value = data.path;
+                    updateProjectPath();
+                    showToast(`✅ Đã chọn: ${data.path}`, 'success');
+                } else if (data.cancelled) {
+                    showToast('Đã hủy chọn folder', 'info');
+                } else {
+                    showToast('❌ Lỗi khi mở dialog', 'error');
+                }
+            } catch (e) {
+                console.error(e);
+                showToast('❌ Lỗi kết nối server', 'error');
+            } finally {
+                btn.innerHTML = originalIcon;
+                btn.disabled = false;
+            }
+        }
+
+        // Handle folder selection from file input
+        function handleFolderSelect(event) {
+            const files = event.target.files;
+            if (files && files.length > 0) {
+                // Get the folder path from the first file's path
+                const firstFile = files[0];
+                const fullPath = firstFile.webkitRelativePath || firstFile.name;
+                const folderPath = fullPath.split('/')[0];
+
+                // For security reasons, browser won't give us the full path
+                // We can only get the folder name, so we'll append it to a base path
+                // This is a browser limitation - for full path selection, we need Electron
+                showToast(`📂 Đã chọn folder: ${folderPath}`, 'info');
+
+                // In Electron app, we would have access to the full path
+                // For now, we'll just update with the folder name
+            }
+        }
+
+        // Create project folders via API
+        async function createProjectFolders() {
+            const projectName = document.getElementById('projectName').value.trim();
+            const outputDir = document.getElementById('outputDirectory').value.trim();
+
+            if (!projectName) {
+                showToast('❌ Vui lòng nhập tên Project!', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/project/create-folders', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        projectName: projectName,
+                        outputDirectory: outputDir
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`✅ Đã tạo: ${result.projectPath}`, 'success');
+                } else {
+                    showToast(`❌ Lỗi: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showToast(`❌ Lỗi: ${error.message}`, 'error');
+            }
+        }
+
+        // ==========================================
+        // LANE MANAGER FUNCTIONS
+        // ==========================================
+
+        // Open Lane Manager modal
+        function openLaneManager() {
+            document.getElementById('laneModal').classList.remove('hidden');
+            loadLanes();
+        }
+
+        // Close Lane Manager modal
+        function closeLaneManager() {
+            document.getElementById('laneModal').classList.add('hidden');
+        }
+
+        // Load lanes from API
+        async function loadLanes() {
+            try {
+                const response = await fetch('/api/lanes/list');
+                const result = await response.json();
+
+                const laneListDiv = document.getElementById('laneList');
+
+                if (result.success && result.lanes.length > 0) {
+                    // Start table
+                    let html = `
+                    <table style="width: 100%; border-collapse: separate; border-spacing: 0 4px;">
+                        <thead>
+                            <tr style="background: rgba(255,255,255,0.05); text-align: left;">
+                                <th style="padding: 10px; width: 15%;">Tên Lane</th>
+                                <th style="padding: 10px; width: 25%;">IDs (Project/Scene)</th>
+                                <th style="padding: 10px; width: 10%;">Trạng thái</th>
+                                <th style="padding: 10px; width: 50%;">Hành động</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+                    // Loop lanes
+                    result.lanes.forEach((lane, index) => {
+                        html += `
+                            <tr style="background: #1e1e2d;">
+                                <td style="padding: 12px; font-weight: bold; border-top: 1px solid #333; border-bottom: 1px solid #333; border-left: 1px solid #333;">${lane.name}</td>
+                                <td style="padding: 12px; font-size: 0.85em; color: #bbb; border-top: 1px solid #333; border-bottom: 1px solid #333;">
+                                    <div style="margin-bottom:4px;">Prj: <span style="color:#fff;">${lane.projectId ? lane.projectId.substring(0, 8) + '...' : '---'}</span></div>
+                                    <div>Scn: <span style="color:#fff;">${lane.sceneId ? lane.sceneId.substring(0, 8) + '...' : '---'}</span></div>
+                                </td>
+                                <td style="padding: 12px; border-top: 1px solid #333; border-bottom: 1px solid #333;">
+                                    ${lane.authorization ? '<span class="status-badge status-LIVE">LIVE</span>' : '<span class="status-badge status-DEAD">DEAD</span>'}
+                                </td>
+                                <td style="padding: 12px; border-top: 1px solid #333; border-bottom: 1px solid #333; border-right: 1px solid #333;">
+                                    <div style="display: flex; gap: 8px;">
+                                        <button onclick="launchChrome('${lane.name}')" class="lane-btn btn-launch" title="Mở Chrome">🖥️ Open</button>
+                                        <button onclick="captureToken('${lane.name}')" class="lane-btn btn-capture" title="Bắt Token">🔑 Catch</button>
+                                        <button onclick="autoRefresh('${lane.name}')" class="lane-btn btn-launch" style="background: #27ae60;" title="Refresh">🔄 Rfrsh</button>
+                                        <button onclick="toggleLaneDetails(${index})" class="lane-btn btn-launch" style="background: #8e44ad;" title="Xem chi tiết">👁️ Chi tiết</button>
+                                        <button onclick="deleteLane('${lane.name}')" class="lane-btn btn-delete" title="Xóa">🗑️</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            
+                            <!-- Detail Row (Hidden) -->
+                            <tr id="lane-detail-row-${index}" class="detail-row hidden">
+                                <td colspan="4">
+                                    <div class="lane-detail-box">
+                                        <h4 style="margin: 0 0 15px 0; color: #a29bfe;">Chi tiết Lane: ${lane.name}</h4>
+                                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                                            <div>
+                                                <div class="input-block">
+                                                    <label style="color: #aaa;">🔗 Dán Link Project (Auto Get IDs):</label>
+                                                    <div style="display:flex; gap:5px;">
+                                                        <input id="url-parser-${index}" type="text" placeholder="https://labs.google/fx/vi/tools/flow/project/..."
+                                                            style="flex:1; background: #222; border: 1px solid #444; color:#fff;">
+                                                        <button onclick="parseLaneUrl(${index})" class="btn-secondary" style="padding: 5px 10px;">🪄 Parse</button>
+                                                    </div>
+                                                </div>
+                                                <div class="input-block">
+                                                    <label style="color: #aaa;">Project ID:</label>
+                                                    <input id="detail-projectId-${index}" type="text" value="${lane.projectId || ''}" 
+                                                        onclick="this.select()" 
+                                                        style="font-family:monospace; background: #0f172a; border: 1px solid #444;">
+                                                </div>
+                                                <div class="input-block">
+                                                    <label style="color: #aaa;">Scene ID:</label>
+                                                    <input id="detail-sceneId-${index}" type="text" value="${lane.sceneId || ''}" 
+                                                        onclick="this.select()"
+                                                        style="font-family:monospace; background: #0f172a; border: 1px solid #444;">
+                                                </div>
+                                                <div class="input-block">
+                                                    <label style="color: #aaa;">Cookies:</label>
+                                                    <textarea id="detail-cookies-${index}" rows="4"
+                                                        onclick="this.select()"
+                                                        style="font-family:monospace; font-size: 0.8em; background: #0f172a; border: 1px solid #444;">${lane.cookies || ''}</textarea>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                 <div class="input-block">
+                                                    <label style="color: #f1c40f;">Authorization (Bearer):</label>
+                                                    <textarea id="detail-auth-${index}" rows="3"
+                                                        onclick="this.select()"
+                                                        style="font-family:monospace; font-size: 0.8em; background: #0f172a; border: 1px solid #f1c40f; color:#f1c40f;">${lane.authorization || ''}</textarea>
+                                                </div>
+                                                 <div class="input-block">
+                                                    <label style="color: #3498db;">Session Token:</label>
+                                                    <textarea id="detail-session-${index}" rows="3"
+                                                        onclick="this.select()"
+                                                        style="font-family:monospace; font-size: 0.8em; background: #0f172a; border: 1px solid #3498db; color:#3498db;">${lane.sessionToken || ''}</textarea>
+                                                </div>
+                                                <button onclick="saveLaneDetails('${lane.name}', ${index})" class="btn-primary" style="width: 100%; margin-top: 10px;">💾 LƯU THAY ĐỔI</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    html += `</tbody></table>
+                    <p style="color: #888; font-size: 0.85em; margin-top: 10px; text-align:right;">📊 Tổng: ${result.lanes.length} lanes</p>`;
+
+                    laneListDiv.innerHTML = html;
+                } else {
+                    laneListDiv.innerHTML = '<div style="padding:20px; text-align:center; color:#888; border: 2px dashed #444; border-radius:12px;">📭 Chưa có lane nào. Thêm mới bên dưới.</div>';
+                }
+            } catch (error) {
+                document.getElementById('laneList').innerHTML = `<p style="color: #e74c3c;">Lỗi: ${error.message}</p>`;
+            }
+        }
+
+        function toggleLaneDetails(index) {
+            const el = document.getElementById(`lane-detail-row-${index}`);
+            el.classList.toggle('hidden');
+        }
+
+        // ... (launchChrome, captureToken, etc can stay same) ...
+
+        // Modal Test Gen Logic
+        function openTestGenModal() {
+            document.getElementById('testGenModal').classList.remove('hidden');
+            refreshTestGenLanes();
+        }
+
+        function closeTestGenModal() {
+            document.getElementById('testGenModal').classList.add('hidden');
+        }
+
+
+        // Launch Chrome
+        async function launchChrome(laneName) {
+            showToast(`🚀 Đang mở Chrome cho lane: ${laneName}...`, 'info');
+            try {
+                const res = await fetch('/api/launch-chrome', { // UPDATED PATH
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ profile: laneName })
+                });
+                const data = await res.json();
+                if (data.success) showToast('✅ Chrome đã mở!', 'success');
+                else showToast(`❌ Lỗi: ${data.error}`, 'error');
+            } catch (e) { showToast(`❌ Lỗi API: ${e.message}`, 'error'); }
+        }
+
+        // Capture Token
+        async function captureToken(laneName) {
+            showToast(`🔑 Đang bắt token cho lane: ${laneName}...`, 'info');
+            try {
+                const res = await fetch('/api/capture-token', { // UPDATED PATH
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ laneName })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    // Update lane with token
+                    const updateData = {
+                        name: laneName,
+                        authorization: data.authorization,
+                        cookies: data.cookies,
+                        sessionToken: data.sessionToken,
+                        projectId: data.projectId,
+                        sceneId: data.sceneId
+                    };
+
+                    const saveRes = await fetch('/api/lanes/save', { // UPDATED PATH
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ lane: updateData }) // UPDATED BODY STRUCTURE
+                    });
+
+                    if ((await saveRes.json()).success) {
+                        const statusMsg = [];
+                        if (data.authorization) statusMsg.push('✅ Auth'); else statusMsg.push('❌ Auth');
+                        if (data.sessionToken) statusMsg.push('✅ Session'); else statusMsg.push('❌ Session');
+                        if (data.cookies) statusMsg.push('✅ Cookies'); else statusMsg.push('❌ Cookies');
+                        if (data.projectId) statusMsg.push('✅ Prj');
+
+                        showToast(`Kết quả Bắt Token:\n${statusMsg.join(' | ')}`, 'success');
+                        loadLanes(); // Refresh
+                    } else {
+                        showToast('❌ Lưu token thất bại', 'error');
+                    }
+
+                } else {
+                    showToast(`❌ ${data.error}`, 'error');
+                }
+            } catch (e) { showToast(`❌ Lỗi API: ${e.message}`, 'error'); }
+        }
+
+        // Auto Refresh
+        async function autoRefresh(laneName) {
+            showToast(`🔄 Đang Auto Refresh cho: ${laneName}...`, 'info');
+            try {
+                const res = await fetch('/api/lanes/auto-refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ laneName })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('✅ Auto Refresh Thành Công!', 'success');
+                    loadLanes();
+                } else {
+                    showToast(`❌ Lỗi: ${data.error}`, 'error');
+                }
+            } catch (e) { showToast(`❌ Lỗi API: ${e.message}`, 'error'); }
+        }
+
+        // Parse URL Helper
+        function parseLaneUrl(input) {
+            // Regex to extract Project ID and Scene ID from various URL formats
+            // Format 1: https://labs.google/fx/tools/video-fx/projects/{projectId}/scenes/{sceneId}
+            // Format 2: .../projects/{projectId}/scenes/{sceneId}...
+
+            const regex = /projects\/([a-zA-Z0-9-]+)\/scenes\/([a-zA-Z0-9-]+)/;
+            const match = input.match(regex);
+
+            if (match && match.length >= 3) {
+                return {
+                    projectId: match[1],
+                    sceneId: match[2]
+                };
+            }
+            return null;
+        }
+
+        // Save lane
+        async function saveLane() {
+            const name = document.getElementById('laneNameInput').value.trim();
+            const projectIdInput = document.getElementById('laneProjectId');
+            const sceneIdInput = document.getElementById('laneSceneId');
+
+            let projectId = projectIdInput.value.trim();
+            let sceneId = sceneIdInput.value.trim();
+            const proxy = document.getElementById('laneProxy').value.trim();
+
+            if (!name) { // Minimal validation
+                showToast('❌ Vui lòng điền Tên Lane!', 'error');
+                return;
+            }
+
+            // Auto-parse if Project ID looks like a URL
+            if (projectId.includes('http') || projectId.includes('projects/')) {
+                const parsed = parseLaneUrl(projectId);
+                if (parsed) {
+                    projectId = parsed.projectId;
+                    sceneId = parsed.sceneId;
+                    // Update UI
+                    projectIdInput.value = projectId;
+                    sceneIdInput.value = sceneId;
+                    showToast('✅ Đã tách Project/Scene ID từ URL', 'success');
+                }
+            }
+
+            try {
+                // Construct lane object
+                const laneData = {
+                    name: name,
+                    projectId: projectId,
+                    sceneId: sceneId,
+                    proxy: proxy
+                };
+
+                const response = await fetch('/api/lanes/save', { // UPDATED PATH
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lane: laneData }) // UPDATED BODY STRUCTURE
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`✅ ${result.message}`, 'success');
+                    // Clear form
+                    document.getElementById('laneNameInput').value = '';
+                    document.getElementById('laneProjectId').value = '';
+                    document.getElementById('laneSceneId').value = '';
+                    document.getElementById('laneProxy').value = '';
+                    // Reload list
+                    loadLanes();
+                } else {
+                    showToast(`❌ ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showToast(`❌ Lỗi: ${error.message}`, 'error');
+            }
+        }
+
+        // Delete lane
+        async function deleteLane(laneName) {
+            if (!confirm(`Xác nhận xóa lane "${laneName}"?`)) return;
+
+            try {
+                const response = await fetch('/api/lanes/delete', { // UPDATED PATH and METHOD
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: laneName })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`✅ ${result.message}`, 'success');
+                    loadLanes();
+                } else {
+                    showToast(`❌ ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showToast(`❌ Lỗi: ${error.message}`, 'error');
+            }
+        }
+
+        // Parse Lane URL for IDs
+        function parseLaneUrl(index) {
+            const urlInput = document.getElementById(`url-parser-${index}`);
+            const url = urlInput.value.trim();
+
+            if (!url) {
+                showToast('❌ Vui lòng dán Link Project vào!', 'error');
+                return;
+            }
+
+            // Regex for Project ID and Scene ID
+            // Supports: .../project/{UUID} and .../scene/{UUID} OR .../scenes/{UUID}
+            // User example: https://labs.google/fx/vi/tools/flow/project/UID/scenes/UID
+            const projectMatch = url.match(/project\/([a-f0-9\-]{36})/i);
+            const sceneMatch = url.match(/(?:scene|scenes)\/([a-f0-9\-]{36})/i);
+
+            let found = 0;
+
+            if (projectMatch && projectMatch[1]) {
+                document.getElementById(`detail-projectId-${index}`).value = projectMatch[1];
+                found++;
+                console.log('Parsed Project ID:', projectMatch[1]);
+            }
+
+            if (sceneMatch && sceneMatch[1]) {
+                document.getElementById(`detail-sceneId-${index}`).value = sceneMatch[1];
+                found++;
+                console.log('Parsed Scene ID:', sceneMatch[1]);
+            } else {
+                console.log('Scene ID not found. URL:', url);
+            }
+
+
+            if (found > 0) {
+                showToast(`✅ Đã trích xuất ${found} IDs! Đừng quên bấm LƯU.`, 'success');
+            } else {
+                showToast('⚠️ Không tìm thấy ID nào trong link này. Kiểm tra lại format.', 'warning');
+            }
+        }
+
+        // Save Lane Details (Edit Mode)
+        async function saveLaneDetails(laneName, index) {
+            const projectId = document.getElementById(`detail-projectId-${index}`).value.trim();
+            const sceneId = document.getElementById(`detail-sceneId-${index}`).value.trim();
+            const cookies = document.getElementById(`detail-cookies-${index}`).value.trim();
+            const authorization = document.getElementById(`detail-auth-${index}`).value.trim();
+            const sessionToken = document.getElementById(`detail-session-${index}`).value.trim();
+
+            if (!laneName) {
+                showToast('❌ Lỗi: Tên Lane không xác định!', 'error');
+                return;
+            }
+
+            try {
+                // Construct updated lane object
+                // Note: We need to preserve other fields, but the backend handles merging effectively if we send the full object we want to update.
+                // However, for safety, let's assume we are updating specific fields.
+                // The backend API /api/lanes/save expects { lane: ... }
+
+                const laneData = {
+                    name: laneName,
+                    projectId: projectId,
+                    sceneId: sceneId,
+                    cookies: cookies,
+                    authorization: authorization,
+                    sessionToken: sessionToken,
+                    savedAt: new Date().toISOString()
+                };
+
+                const response = await fetch('/api/lanes/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ lane: laneData })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`✅ Đã lưu cập nhật cho Lane: ${laneName}`, 'success');
+                    // Reload list to refresh view (optional, but good for sync)
+                    // loadLanes(); // Might close the detail view, so maybe just toast is enough
+                } else {
+                    showToast(`❌ ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showToast(`❌ Lỗi: ${error.message}`, 'error');
+            }
+        }
+
+
+
+
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {
+            // Ready
+        });
+
+        // Trigger Backup
+        async function triggerBackup() {
+            const btn = document.querySelector('button[title="Sao lưu toàn bộ Source Code"]');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '⏳ Backing up...';
+            btn.disabled = true;
+
+            try {
+                showToast('📦 Đang tạo bản sao lưu...', 'info');
+                const response = await fetch('/api/backup', { method: 'POST' });
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast(`✅ Backup thành công!\n📁 ${result.name}`, 'success');
+                    console.log('Backup Path:', result.path);
+                } else {
+                    showToast(`❌ Backup thất bại: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                showToast(`❌ Lỗi kết nối: ${error.message}`, 'error');
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // ==========================================
+        // TEST GEN BUBBLE LOGIC
+        // ==========================================
+
+        async function refreshTestGenLanes() {
+            const select = document.getElementById('testGenLaneSelect');
+            if (!select) return;
+            select.innerHTML = '<option value="">⏳ Loading...</option>';
+
+            try {
+                // Use existing endpoint
+                const response = await fetch('/api/lanes/list');
+                const res = await response.json();
+
+                // Clear old
+                select.innerHTML = '<option value="">-- Chọn Lane --</option>';
+
+                if (res.success && res.lanes) {
+                    res.lanes.forEach(lane => {
+                        const opt = document.createElement('option');
+                        opt.value = lane.name;
+                        const status = (lane.authorization && lane.authorization.length > 20) ? '✅' : '❌';
+                        opt.textContent = `${lane.name} (${status})`;
+                        select.appendChild(opt);
+                    });
+                }
+            } catch (e) {
+                console.error(e);
+                select.innerHTML = '<option value="">Lỗi kết nối</option>';
+            }
+        }
+
+        // Initialize Test Gen lanes on load
+        window.addEventListener('load', () => {
+            setTimeout(refreshTestGenLanes, 1000);
+        });
+
+        async function runTestGen() {
+            const lane = document.getElementById('testGenLaneSelect').value;
+            const imgPromptsRaw = document.getElementById('testGenImagePrompts').value;
+            const vidPrompt = document.getElementById('testGenVideoPrompt').value;
+            const startId = document.getElementById('testGenStartId').value.trim();
+            const endId = document.getElementById('testGenEndId').value.trim();
+            const logDiv = document.getElementById('testGenLog');
+
+            if (!lane) { alert('Chưa chọn Lane!'); return; }
+
+            // Validate: Need either Image Prompts OR Start ID to do anything
+            if (!imgPromptsRaw.trim() && !startId && !vidPrompt) {
+                alert('Cần nhập ít nhất: Image Prompt HOẶC Start ID HOẶC Video Prompt!');
+                return;
+            }
+
+            const imgPrompts = imgPromptsRaw.split('\n').map(l => l.trim()).filter(l => l);
+
+            // Clear log
+            logDiv.innerHTML = '';
+            const startLine = document.createElement('div');
+            startLine.className = 'log-item';
+            startLine.textContent = 'CONNECTING...';
+            startLine.style.color = '#f1c40f';
+            logDiv.appendChild(startLine);
+
+            // Encode params
+            const params = new URLSearchParams({
+                laneName: lane,
+                imagePrompts: JSON.stringify(imgPrompts),
+                videoPrompt: vidPrompt,
+                startId: startId,
+                endId: endId
+            });
+
+            // Close existing if any
+            if (window.currentEventSource) {
+                window.currentEventSource.close();
+            }
+
+            const eventSource = new EventSource(`/api/test-gen/stream?${params.toString()}`);
+            window.currentEventSource = eventSource;
+
+            eventSource.onopen = function () {
+                console.log("SSE Connected");
+            };
+
+            eventSource.onmessage = function (event) {
+                const msg = JSON.parse(event.data);
+
+                if (msg.type === 'log') {
+                    const line = document.createElement('div');
+                    line.className = 'log-item';
+                    line.textContent = msg.data;
+                    logDiv.appendChild(line);
+                    logDiv.scrollTop = logDiv.scrollHeight;
+                } else if (msg.type === 'image_success') {
+                    const line = document.createElement('div');
+                    line.className = 'log-success';
+                    line.innerHTML = `✅ Generated Image: <b>${msg.data.mediaId.substring(0, 10)}...</b>`;
+                    logDiv.appendChild(line);
+                } else if (msg.type === 'video_success') {
+                    const line = document.createElement('div');
+                    line.className = 'log-success';
+                    line.innerHTML = `✅ Generated Video! Operation: <b>${JSON.stringify(msg.data.operationId || 'OK')}</b>`;
+                    logDiv.appendChild(line);
+                } else if (msg.type === 'error') {
+                    const line = document.createElement('div');
+                    line.className = 'log-error';
+                    line.textContent = msg.data;
+                    logDiv.appendChild(line);
+                } else if (msg.type === 'done') {
+                    eventSource.close();
+                    const line = document.createElement('div');
+                    line.className = 'log-success';
+                    line.textContent = '🏁 Test Session Finished.';
+                    logDiv.appendChild(line);
+                }
+            };
+
+            eventSource.onerror = function (err) {
+                console.error("SSE Error:", err);
+                eventSource.close();
+                const line = document.createElement('div');
+                line.className = 'log-error';
+                line.textContent = '❌ Connection lost or Error.';
+                logDiv.appendChild(line);
+            };
+        }
+    </script>
+
+
+
+    <!-- AI33 Global Widget (Bubble) -->
+    <div id="ai33-bubble" class="ai33-bubble collapsed">
+        <div class="ai33-header" onclick="toggleAI33Bubble()">
+            <span class="ai33-icon">🎙️</span>
+            <div class="ai33-stats">
+                <span id="ai33-credits">Credits: ...</span>
+                <span id="ai33-health" title="Health Status">⚪</span>
+            </div>
+            <span class="ai33-toggle">▲</span>
+        </div>
+        <div class="ai33-body">
+            <!-- Voice Service Selector -->
+            <div class="ai33-section" style="padding-bottom: 10px; border-bottom: 1px solid #444; margin-bottom: 10px;">
+                <label>🔄 Voice Service</label>
+                <select id="voiceServiceSelector"
+                    style="width:100%; padding:8px; background:#1a1a2e; border:1px solid #444; color:#fff; border-radius:4px;">
+                    <option value="">-- Chọn dịch vụ Voice --</option>
+                    <option value="ai33">🎙️ AI33 (api.ai33.pro)</option>
+                    <option value="genai">🎧 GenAI Labs (genaipro.vn)</option>
+                    <option value="ai84">🚀 AI84.pro (api.ai84.pro)</option>
+                </select>
+            </div>
+
+            <!-- Concurrency Settings -->
+            <div class="ai33-section" style="padding-bottom: 10px; border-bottom: 1px solid #444; margin-bottom: 10px;">
+                <label>🧵 Số luồng tạo Voice:</label>
+                <select id="voiceConcurrencyLimit"
+                    style="width:100%; padding:8px; background:#1a1a2e; border:1px solid #444; color:#fff; border-radius:4px;">
+                    <option value="5" selected>5 Luồng (Mặc định)</option>
+                    <option value="10">10 Luồng (Nâng cao)</option>
+                    <option value="15">15 Luồng (Nâng cao)</option>
+                    <option value="20">20 Luồng (Mở rộng)</option>
+                </select>
+                <small style="color: #888; font-size: 0.75em; display: block; margin-top: 4px;">Giới hạn số task
+                    chạy
+                    song song để tránh bị GenAI khóa.</small>
+            </div>
+
+            <!-- No Service Selected Message -->
+            <div id="no-service-selected" style="text-align:center; padding:20px; color:#888;">
+                <div style="font-size:1.5em; margin-bottom:10px;">⚠️</div>
+                <div>Vui lòng chọn dịch vụ Voice ở trên</div>
+                <div style="font-size:0.8em; margin-top:5px;">để cấu hình API Key và Voice ID</div>
+            </div>
+
+            <!-- AI33 Section (hidden by default) -->
+            <div id="ai33-voice-section" style="display:none;">
+                <div class="ai33-section">
+                    <label>🔑 AI33 API Keys</label>
+                    <div class="input-group">
+                        <input type="text" id="ai33-new-key" placeholder="Paste New Key Here..."
+                            style="font-family: monospace;">
+                        <button class="btn-small btn-green" onclick="addAI33Key()">➕ Add</button>
+                    </div>
+                    <div id="ai33-key-list-container" class="key-list-box"
+                        style="margin-top: 5px; max-height: 120px; overflow-y: auto; background: #222; border: 1px solid #444; border-radius: 4px; padding: 5px;">
+                        <div style="color: #888; font-size: 0.8em; text-align: center; padding: 10px;">Loading
+                            keys...
+                        </div>
+                    </div>
+                </div>
+                <!-- AI33 Saved Voices (inside AI33 section) -->
+                <div class="ai33-section">
+                    <label>🗣️ Saved Voices Manager</label>
+                    <div class="input-group">
+                        <input type="text" id="ai33-new-name" placeholder="Name (e.g. Trầm Ấm)" style="width: 40%;">
+                        <input type="text" id="ai33-new-id" placeholder="Voice ID" style="width: 40%;">
+                        <button class="btn-small btn-green" onclick="addAI33Voice()">+</button>
+                    </div>
+                    <div id="ai33-voice-list" class="voice-list">
+                        <!-- Loaded dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- GenAI Section (hidden by default) -->
+            <div id="genai-voice-section" style="display:none;">
+                <div class="ai33-section">
+                    <label>🔑 GenAI JWT Tokens (Hỗ trợ nhiều luồng)</label>
+                    <div class="input-group">
+                        <input type="password" id="genai-token-input" placeholder="Paste JWT Token..."
+                            style="flex:1; font-family: monospace;">
+                        <button class="btn-small btn-green" onclick="addGenAIToken()">➕ Add</button>
+                    </div>
+                    <!-- Token List Container -->
+                    <div id="genai-token-list-container" class="key-list-box"
+                        style="margin-top: 5px; max-height: 150px; overflow-y: auto; background: #222; border: 1px solid #444; border-radius: 4px; padding: 5px;">
+                        <div style="color: #888; font-size: 0.8em; text-align: center; padding: 10px;">Loading
+                            tokens...
+                        </div>
+                    </div>
+                    <!-- Total Comparison Status -->
+                    <div id="genai-token-status"
+                        style="margin-top: 5px; background: #1a1a2e; border: 1px solid #444; border-radius: 4px; padding: 8px; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color:#aaa; font-size: 0.85em;">💰 Tổng Credit khả dụng:</span>
+                        <span id="genai-credits-display" style="color:#f39c12; font-weight:bold;">--</span>
+                    </div>
+                </div>
+                <div class="ai33-section">
+                    <label>🗣️ GenAI Saved Voices</label>
+                    <div class="input-group">
+                        <input type="text" id="genai-new-name" placeholder="Name" style="width:35%;">
+                        <input type="text" id="genai-new-id" placeholder="Voice ID" style="width:45%;">
+                        <button class="btn-small btn-green" onclick="addGenAIVoice()">+</button>
+                    </div>
+                    <div id="genai-voice-list" style="margin-top:5px; max-height:120px; overflow-y:auto;">
+                        <!-- Loaded dynamically -->
+                    </div>
+                    <button class="btn-small" onclick="browseGenAIVoices()"
+                        style="margin-top:8px; width:100%; background:#3498db;">
+                        🔍 Browse Voices Library
+                    </button>
+                </div>
+            </div>
+
+            <!-- AI84 Section (hidden by default) -->
+            <div id="ai84-voice-section" style="display:none;">
+                <div class="ai33-section">
+                    <label>🔑 AI84 API Keys (Multi-threading)</label>
+                    <div class="input-group">
+                        <input type="password" id="ai84-key-input" placeholder="xi-api-key..."
+                            style="flex:1; font-family: monospace;">
+                        <button class="btn-small btn-green" onclick="addAI84Key()">➕ Add</button>
+                    </div>
+                    <div id="ai84-key-list-container" class="key-list-box"
+                        style="margin-top: 5px; max-height: 150px; overflow-y: auto; background: #222; border: 1px solid #444; border-radius: 4px; padding: 5px;">
+                        <div style="color: #888; font-size: 0.8em; text-align: center; padding: 10px;">Loading
+                            keys...
+                        </div>
+                    </div>
+                    <div id="ai84-status-box"
+                        style="margin-top: 5px; background: #1a1a2e; border: 1px solid #444; border-radius: 4px; padding: 8px; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="color:#aaa; font-size: 0.85em;">💰 Tổng Credit:</span>
+                        <span id="ai84-credits-display" style="color:#2ecc71; font-weight:bold;">--</span>
+                    </div>
+                </div>
+                <div class="ai33-section">
+                    <label>🗣️ AI84 Saved Voices</label>
+                    <div class="input-group">
+                        <input type="text" id="ai84-new-name" placeholder="Name" style="width:35%;">
+                        <input type="text" id="ai84-new-id" placeholder="Voice ID" style="width:45%;">
+                        <button class="btn-small btn-green" onclick="addAI84Voice()">+</button>
+                    </div>
+                    <div id="ai84-voice-list" style="margin-top:5px; max-height:120px; overflow-y:auto;">
+                        <!-- Loaded dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer (always visible) -->
+            <div class="ai33-footer">
+                <button class="btn-tiny"
+                    onclick="window.getCurrentVoiceService && window.getCurrentVoiceService() === 'ai33' ? refreshAI33Stats() : updateMainCreditsDisplay()">🔄
+                    Refresh Stats</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gemini Chat Bubble -->
+    <div id="chatBubble" class="chat-bubble">
+        <button id="chatToggle" class="chat-toggle" onclick="toggleChat()">
+            <span id="chatIcon">💬</span>
+        </button>
+
+        <div id="chatWindow" class="chat-window hidden">
+            <div class="chat-header">
+                <div style="display:flex; flex-direction:column; gap:2px;">
+                    <h4 style="margin:0;">💎 Gemini/Gemma Test</h4>
+                    <select id="chatModelSelect"
+                        style="background:#1e293b; color:#cbd5e1; border:1px solid #475569; font-size:0.75em; border-radius:3px; padding:2px;">
+                        <option value="gemini-3-flash-preview">gemini-3-flash-preview</option>
+                        <option value="gemini-3-pro-preview">gemini-3-pro-preview</option>
+                        <option value="gemini-2.5-flash" selected>gemini-2.5-flash</option>
+                        <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite</option>
+                        <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+                        <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                        <option value="gemma-3-27b-it">gemma-3-27b-it</option>
+                    </select>
+                    <select id="chatKeySelect"
+                        style="background:#1e293b; color:#cbd5e1; border:1px solid #475569; font-size:0.75em; border-radius:3px; padding:2px;">
+                        <option value="">-- Random Key --</option>
+                    </select>
+                </div>
+                <button class="chat-minimize" onclick="toggleChat()">−</button>
+            </div>
+
+            <div class="chat-messages" id="chatMessages">
+                <div class="chat-message assistant">
+                    <div class="message-content">
+                        👋 Xin chào! Tôi là Gemma 3 27B. Tôi có thể giúp gì cho bạn?
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-input-container">
+                <textarea id="chatInput" placeholder="Nhập tin nhắn..." rows="2"></textarea>
+                <button id="chatSend" onclick="sendChatMessage()">
+                    <span id="sendIcon">📤</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .chat-bubble {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            /* Chat is now first */
+            z-index: 10001;
+        }
+
+        .chat-toggle {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            cursor: pointer;
+            font-size: 24px;
+            /* Same as proxy */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            color: white;
+        }
+
+        .chat-toggle:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .chat-window {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            right: auto;
+            width: 380px;
+            height: 500px;
+            background: rgba(17, 25, 40, 0.95);
+            backdrop-filter: blur(16px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .chat-window.hidden {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(20px);
+        }
+
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-header h4 {
+            margin: 0;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .chat-minimize {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+
+        .chat-minimize:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .chat-message {
+            display: flex;
+            flex-direction: column;
+            max-width: 85%;
+            animation: messageSlide 0.3s ease;
+        }
+
+        @keyframes messageSlide {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .chat-message.user {
+            align-self: flex-end;
+        }
+
+        .chat-message.assistant {
+            align-self: flex-start;
+        }
+
+        .message-content {
+            padding: 10px 14px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .chat-message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .chat-message.assistant .message-content {
+            background: rgba(255, 255, 255, 0.1);
+            color: #e0e0e0;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .chat-input-container {
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.3);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input-container textarea {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: white;
+            padding: 10px;
+            font-size: 14px;
+            resize: none;
+            font-family: inherit;
+        }
+
+        .chat-input-container textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .chat-input-container button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 8px;
+            width: 45px;
+            height: 45px;
+            cursor: pointer;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s;
+        }
+
+        .chat-input-container button:hover {
+            transform: scale(1.05);
+        }
+
+        .chat-input-container button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Scrollbar styling */
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.5);
+            border-radius: 3px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: rgba(102, 126, 234, 0.7);
+        }
+    </style>
+
+    <script>
+        async function toggleChat() {
+            const chatWindow = document.getElementById('chatWindow');
+            const chatIcon = document.getElementById('chatIcon');
+
+            if (chatWindow.classList.contains('hidden')) {
+                chatWindow.classList.remove('hidden');
+                chatIcon.innerHTML = '<span style="font-family:sans-serif; font-weight:100; font-size: 30px; line-height: 1;">✕</span>';
+                await populateGeminiChatKeys();
+            } else {
+                chatWindow.classList.add('hidden');
+                chatIcon.textContent = '💬';
+            }
+        }
+
+        async function populateGeminiChatKeys() {
+            const chatKeySelect = document.getElementById('chatKeySelect');
+            if (!chatKeySelect) return;
+
+            const currentVal = chatKeySelect.value;
+            chatKeySelect.innerHTML = '<option value="">-- Random Key --</option>';
+
+            try {
+                // FETCH 100 KEYS FROM CONFIG
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                if (data.success && data.config.GEMINI_API_KEYS) {
+                    const keys = data.config.GEMINI_API_KEYS;
+                    keys.forEach((key, idx) => {
+                        // Filter only Gemini keys starting with AIza
+                        if (key.startsWith('AIza')) {
+                            const opt = document.createElement('option');
+                            opt.value = key;
+                            opt.textContent = `#${idx + 1} (...${key.slice(-8)})`;
+                            if (key === currentVal) opt.selected = true;
+                            chatKeySelect.appendChild(opt);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error('Failed to load Gemini keys for chat:', e);
+            }
+        }
+
+        // Store sessionId in memory (persists during page session)
+        let chatSessionId = null;
+
+        async function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const sendBtn = document.getElementById('chatSend');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Add user message
+            addMessage(message, 'user');
+            input.value = '';
+
+            // Disable send button
+            sendBtn.disabled = true;
+            sendBtn.querySelector('#sendIcon').textContent = '⏳';
+
+            try {
+                const modelName = document.getElementById('chatModelSelect')?.value || 'gemini-1.5-flash';
+                const response = await fetch('/api/gemini-chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message,
+                        sessionId: chatSessionId, // Send session ID if exists
+                        modelName,
+                        apiKey: document.getElementById('chatKeySelect')?.value || ''
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    // Store sessionId for future messages
+                    if (data.sessionId) {
+                        chatSessionId = data.sessionId;
+                    }
+                    addMessage(data.reply, 'assistant');
+                } else {
+                    addMessage('❌ Error: ' + data.error, 'assistant');
+                }
+            } catch (error) {
+                addMessage('❌ Connection error: ' + error.message, 'assistant');
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.querySelector('#sendIcon').textContent = '📤';
+            }
+        }
+
+        function addMessage(content, role) {
+            const messagesContainer = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${role}`;
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = content;
+
+            messageDiv.appendChild(contentDiv);
+            messagesContainer.appendChild(messageDiv);
+
+            // Auto scroll to bottom
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        // Send on Enter (Shift+Enter for new line)
+        document.addEventListener('DOMContentLoaded', () => {
+            const chatInput = document.getElementById('chatInput');
+            if (chatInput) {
+                chatInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendChatMessage();
+                    }
+                });
+            }
+        });
+
+        // ==========================================
+        // SCRIPT ASSISTANT LOGIC
+        // ==========================================
+        let scriptSessionId = null;
+
+        function toggleScriptAssistant() {
+            const area = document.getElementById('scriptAssistantArea');
+            if (area) area.classList.toggle('hidden');
+        }
+
+        async function primeScriptSession() {
+            const profileId = document.getElementById('profileSelect').value;
+            if (!profileId) {
+                showToast('❌ Vui lòng chọn Profile ở Header trước!', 'error');
+                return;
+            }
+
+            const chatLog = document.getElementById('scriptChatLog');
+            chatLog.innerHTML += `<div style="color: #3498db; margin-bottom: 8px;">⏳ Đang nạp luật từ Profile: <b>${profileId}</b>...</div>`;
+            chatLog.scrollTop = chatLog.scrollHeight;
+
+            try {
+                const res = await fetch('/api/script-assistant/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sessionId: scriptSessionId,
+                        profileId,
+                        injectRules: true
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    scriptSessionId = data.sessionId;
+                    chatLog.innerHTML += `<div style="background: rgba(39, 174, 96, 0.1); padding: 8px; border-radius: 4px; margin-bottom: 8px; border-left: 3px solid #27ae60; font-size: 0.85em; color: #add8e6;">✅ <b>System:</b> Rules have been primed. Gemma is now aware of your profile preferences.</div>`;
+                    chatLog.scrollTop = chatLog.scrollHeight;
+                } else {
+                    showToast('❌ Lỗi priming: ' + data.error, 'error');
+                }
+            } catch (e) {
+                showToast('❌ Lỗi kết nối: ' + e.message, 'error');
+            }
+        }
+
+        async function sendScriptAssistantChat() {
+            const input = document.getElementById('scriptAssistantInput');
+            const message = input.value.trim();
+            const profileId = document.getElementById('profileSelect').value;
+            if (!message) return;
+
+            input.value = '';
+            const chatLog = document.getElementById('scriptChatLog');
+            chatLog.innerHTML += `<div style="text-align: right; margin-bottom: 8px;"><span style="background: #2563eb; color: white; padding: 4px 10px; border-radius: 12px; display: inline-block;">${message}</span></div>`;
+            chatLog.scrollTop = chatLog.scrollHeight;
+
+            try {
+                const res = await fetch('/api/script-assistant/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message,
+                        sessionId: scriptSessionId,
+                        profileId
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    scriptSessionId = data.sessionId;
+                    // Format response (basic markdown-like)
+                    const reply = data.reply.replace(/\n/g, '<br>');
+                    chatLog.innerHTML += `<div style="margin-bottom: 12px; background: rgba(51, 65, 85, 0.5); padding: 8px; border-radius: 4px; border: 1px solid #475569;">${reply}</div>`;
+                    chatLog.scrollTop = chatLog.scrollHeight;
+
+                    // If a long reply is detected, offer to push to Final Script
+                    if (data.reply.length > 200) {
+                        const pushBtn = document.createElement('button');
+                        pushBtn.className = 'btn-tiny';
+                        pushBtn.style.marginTop = '5px';
+                        pushBtn.style.background = '#e67e22';
+                        pushBtn.innerHTML = '📝 Đẩy vào Final Script';
+                        pushBtn.onclick = () => {
+                            document.getElementById('finalScriptArea').value = data.reply;
+                            document.getElementById('scriptResult').classList.remove('hidden');
+                            showToast('✅ Đã đẩy kịch bản vào vùng xử lý!', 'success');
+                        };
+                        chatLog.appendChild(pushBtn);
+                        chatLog.scrollTop = chatLog.scrollHeight;
+                    }
+                } else {
+                    chatLog.innerHTML += `<div style="color: #ef4444;">❌ Lỗi: ${data.error}</div>`;
+                }
+            } catch (e) {
+                chatLog.innerHTML += `<div style="color: #ef4444;">❌ Lỗi kết nối: ${e.message}</div>`;
+            }
+        }
+
+        async function resetScriptSession() {
+            if (!scriptSessionId) return;
+            try {
+                await fetch('/api/script-assistant/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: scriptSessionId })
+                });
+                scriptSessionId = null;
+                document.getElementById('scriptChatLog').innerHTML = '<div style="color: #64748b; font-style: italic; text-align: center;">Session đã reset.</div>';
+                showToast('🔄 Reset session thành công', 'success');
+            } catch (e) { console.error(e); }
+        }
+
+        function copyFinalScript() {
+            const area = document.getElementById('finalScriptArea');
+            area.select();
+            document.execCommand('copy');
+            showToast('✅ Đã copy kịch bản!', 'success');
+        }
+
+        // Allow Enter to send in Script Assistant
+        document.addEventListener('DOMContentLoaded', () => {
+            const assistantInput = document.getElementById('scriptAssistantInput');
+            if (assistantInput) {
+                assistantInput.addEventListener('keypress', function (e) {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        sendScriptAssistantChat();
+                    }
+                });
+            }
+        });
+    </script>
+
+    <!-- Scripts -->
+    <script src="js/main.js"></script>
+    <script src="js/queue_handlers.js"></script>
+    <script src="js/settings.js"></script>
+    <script src="js/ai33.js"></script>
+    <script src="js/testgen_helper.js"></script>
+    <script src="js/genai.js"></script>
+    <script src="js/ai84.js"></script>
+    <script src="js/proxy_widget.js"></script>
+</body>
+
+</html>

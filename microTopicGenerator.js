@@ -3,6 +3,7 @@ const keyManager = require('./keyManager');
 const db = require('./database');
 const { log } = require('./colors');
 const { parseAIJSON } = require('./json_helper');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
 /**
  * LEGO Step 1.8: Micro-Topic Generator
@@ -27,7 +28,7 @@ A micro-topic is a narrowly scoped psychological question that:
 STRICT RULES:
 1. ARC COMPLETENESS: Each micro-topic MUST be resolvable without referring to any future or related topic. The resolution must close the core question completely. Do NOT design topics that require follow-up videos.
 2. ONE MECHANISM: Each micro-topic must revolve around ONE specific mechanism. If more than one mechanism is required to explain the topic, it is INVALID.
-3. ROLE FIT: Each topic must be structured to fit perfectly into exactly 6 stages: Hook Threat, Mechanism Exposed, Power Imbalance, Boundary Definition, Cold Resolution, and Open Loop.
+3. ROLE FIT: Each topic must be structured to fit perfectly into exactly 4 modules: Hook Threat, Mechanism Exposed, Power Balance, and Cold Resolution.
 4. Standalone Rule: Do NOT ever use phrases like "part 2", "more in the next video", or "continued".
 
 CORE TOPIC:
@@ -47,10 +48,8 @@ OUTPUT FORMAT (JSON ONLY):
     "role_fit": {
       "hook_threat": true,
       "mechanism_exposed": true,
-      "power_imbalance": true,
-      "boundary_definition": true,
-      "cold_resolution": true,
-      "open_loop": true
+      "power_balance": true,
+      "cold_resolution": true
     }
   }
 ]
@@ -64,7 +63,6 @@ OUTPUT FORMAT (JSON ONLY):
 
         log.success(`✅ Generated 3 Micro-Topics for LEGO production.`);
 
-        // Persistence (Optional: Log to AI actions)
         if (projectId) {
             const project = await db.getProject(projectId);
             let analysis = {};
@@ -81,16 +79,22 @@ OUTPUT FORMAT (JSON ONLY):
 }
 
 async function executeAIGenerator(projectId, prompt) {
-    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it'];
+    // UPDATED MODEL PRIORITY: Primary Gemini 3, Fallback Gemma 3/2.5 Flash
+    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it', 'gemini-2.5-flash'];
 
     for (const modelName of MODEL_PRIORITY) {
         try {
-            return await keyManager.executeWithRetry(async (apiKey) => {
+            return await keyManager.executeWithRetry(async (apiKey, proxy) => {
+                const proxyUrl = keyManager.formatProxyUrl(proxy);
+                const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : null;
+
                 const genAI = new GoogleGenerativeAI(apiKey);
                 const model = genAI.getGenerativeModel({
                     model: modelName,
                     apiVersion: 'v1beta',
                     generationConfig: { maxOutputTokens: 2048, temperature: 0.7 }
+                }, {
+                    httpOptions: agent ? { agent } : undefined
                 });
 
                 const result = await model.generateContent(prompt);
@@ -101,6 +105,9 @@ async function executeAIGenerator(projectId, prompt) {
                     if (projectId) await db.logAIAction(projectId, 'MICRO_TOPIC_GEN', modelName, 0, text);
                     return json;
                 }
+
+                log.error(`[DEBUG] MicroTopicGen failed to parse JSON from AI response. Raw text length: ${text.length}`);
+                log.error(`[DEBUG] Raw AI Text: ${text.substring(0, 500)}...`);
                 throw new Error("Invalid JSON from AI result.");
             });
         } catch (err) {

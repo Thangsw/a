@@ -41,18 +41,15 @@ async function assembleMegaVideo(projectId, modules, niche = 'dark_psychology_de
     for (let i = 0; i < blocks.length; i++) {
         log.info(`📦 Đang gộp Block ${i + 1}...`);
 
-        // Audio của block này
-        // LEGO blocks now contain their own SRT and Visual Prompts from downstream gen
-        // We find the block data in the database or passed parameters
-        const blockMeta = modules.find(m => m.block_id === i + 1); // Sample logic
+        // block hien tai chinh la 1 phan tu trong mang `legoBlocks` nhung duoc truyen qua argument `modules` (thuc chat la legoBlocks tu analyze.js)
+        const block = modules[i];
 
-        // Placeholder for real data mapping - in LEGO mode, we'd have it in modules or result
         finalAssets.push({
             type: 'block',
-            path: blocks[i][0].audio_path || "", // First module audio usually represents block in this dummy
-            duration: blocks[i].reduce((sum, m) => sum + (m.audio_duration || 0), 0),
-            srt: blocks[i].map(m => m.srt_content).join('\n\n'),
-            visual_prompts: blocks[i].flatMap(m => m.visual_prompts || [])
+            path: block.audio_path || "",
+            duration: block.duration || 0,
+            srt: block.srt_path ? fs.readFileSync(block.srt_path, 'utf8') : "",
+            visual_prompts: block.visual_prompts || []
         });
 
         // Chèn Bridge Audio sau block 1 và block 2

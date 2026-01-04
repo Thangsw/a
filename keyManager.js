@@ -17,7 +17,7 @@ class KeyManager {
     constructor() {
         this.keys = [];           // Array of key strings
         this.proxies = [];        // Array of proxy strings
-        this.keyStatus = {};      // { key: { status: 'LIVE'|'BUSY'|'COOLING'|'DEAD', lastChecked: timestamp } }
+        this.keyStatus = {};      // { key: { status: 'LIVE'|'BUSY'|'COOLING'|'DEAD'|'IN_USE', lastChecked: timestamp } }
         this.proxyStatus = {};    // { proxy: { status: 'LIVE'|'DEAD', msg: string } }
         this.currentIndex = 0;
         this.proxyIndex = 0;
@@ -74,14 +74,15 @@ class KeyManager {
         return [...this.keys];
     }
 
-    // Get next available (non-BUSY, non-COOLING) key
+    // Get next available (non-BUSY, non-COOLING, non-IN_USE) key
     getNextAvailableKey() {
         if (this.keys.length === 0) this.refreshKeys();
         if (this.keys.length === 0) throw new Error("No API Keys configured!");
 
         const now = Date.now();
-        const BUSY_COOLDOWN = 60000;       // 60s for errors (per user request)
-        const COOLING_COOLDOWN = 65000;    // 65s for normal usage (Smart Queue)
+        const BUSY_COOLDOWN = 60000;       // 60s for errors
+        const COOLING_COOLDOWN = 65000;    // 65s for normal rotation
+        const IN_USE_TIMEOUT = 300000;     // 5m safety timeout
 
         for (let i = 0; i < this.keys.length; i++) {
             const idx = (this.currentIndex + i) % this.keys.length;
@@ -102,7 +103,15 @@ class KeyManager {
                 console.log(`${COLORS.green}🍃 Key ${idx} đã xả nhiệt xong, quay lại Pool${COLORS.reset}`);
             }
 
+            // Safety: Clear IN_USE if it's been stuck for more than 5 minutes
+            if (status.status === 'IN_USE' && (now - status.lastChecked) > IN_USE_TIMEOUT) {
+                status.status = 'LIVE';
+                console.log(`${COLORS.yellow}⚠️ Key ${idx} bị kẹt IN_USE quá lâu, đặt lại thành LIVE${COLORS.reset}`);
+            }
+
             if (status.status === 'LIVE') {
+                status.status = 'IN_USE'; // ✅ Mark immediately to prevent parallel collision
+                status.lastChecked = now;
                 this.currentIndex = (idx + 1) % this.keys.length;
                 return key;
             }
@@ -117,28 +126,25 @@ class KeyManager {
             this.keyStatus[key].status = 'COOLING';
             this.keyStatus[key].lastChecked = Date.now();
             const idx = this.keys.indexOf(key);
-            console.log(`${COLORS.blue}❄️ Key ${idx} đang được xả nhiệt (65s)...${COLORS.reset}`);
+            console.log(`${COLORS.blue}❄️ Key ${idx} đã sử dụng xong, đang xả nhiệt (65s)...${COLORS.reset}`);
         }
     }
 
-    // Get next proxy in rotation (only LIVE ones if tested)
+    // Get next proxy in rotation
     getNextProxy() {
         if (this.proxies.length === 0) return null;
 
-        // Try to find a LIVE proxy in rotation
         for (let i = 0; i < this.proxies.length; i++) {
             const idx = (this.proxyIndex + i) % this.proxies.length;
             const p = this.proxies[idx];
             const status = this.proxyStatus[p];
 
-            // If not tested yet or LIVE, use it
             if (!status || status.status === 'LIVE') {
                 this.proxyIndex = (idx + 1) % this.proxies.length;
                 return p;
             }
         }
 
-        // If all DEAD (tested), fallback to any
         const p = this.proxies[this.proxyIndex];
         this.proxyIndex = (this.proxyIndex + 1) % this.proxies.length;
         return p;
@@ -147,15 +153,12 @@ class KeyManager {
     async testProxies() {
         console.log(`${COLORS.cyan}🌐 Đang kiểm tra ${this.proxies.length} proxies...${COLORS.reset}`);
         const axios = require('axios');
-        const { HttpsProxyAgent } = require('https-proxy-agent');
 
         const results = await Promise.all(this.proxies.map(async (proxy) => {
             try {
-                const [host, port, user, pass] = proxy.split(':');
-                const proxyUrl = user && pass ? `http://${user}:${pass}@${host}:${port}` : `http://${proxy}`;
+                const proxyUrl = this.formatProxyUrl(proxy);
                 const agent = new HttpsProxyAgent(proxyUrl);
                 const startTime = Date.now();
-                // Test against a simple reliable endpoint
                 await axios.get('https://www.google.com', {
                     httpsAgent: agent,
                     timeout: 5000
@@ -174,12 +177,19 @@ class KeyManager {
         return results;
     }
 
+    formatProxyUrl(proxy) {
+        if (!proxy) return null;
+        const parts = proxy.split(':');
+        if (parts.length === 4) {
+            return `http://${parts[2]}:${parts[3]}@${parts[0]}:${parts[1]}`;
+        }
+        return proxy.includes('://') ? proxy : `http://${proxy}`;
+    }
+
     markKeyBusy(key) {
         if (this.keyStatus[key]) {
             const idx = this.keys.indexOf(key);
-            if (this.keyStatus[key].status !== 'BUSY') {
-                console.log(`${COLORS.yellow}⛔ Key ${idx} bị đánh dấu BUSY - sẽ tạm nghỉ 60s${COLORS.reset}`);
-            }
+            console.log(`${COLORS.yellow}⛔ Key ${idx} bị đánh dấu BUSY - sẽ tạm nghỉ 60s${COLORS.reset}`);
             this.keyStatus[key].status = 'BUSY';
             this.keyStatus[key].lastChecked = Date.now();
         }
@@ -194,22 +204,9 @@ class KeyManager {
         }
     }
 
-    rotateKey() {
-        this.currentIndex = (this.currentIndex + 1) % this.keys.length;
-    }
-
-    getKeyCount() {
-        if (this.keys.length === 0) this.refreshKeys();
-        return this.keys.length;
-    }
-
-    getLiveKeyCount() {
-        return Object.values(this.keyStatus).filter(s => s.status === 'LIVE').length;
-    }
-
     async executeWithRetry(apiCallFunction) {
         let attempts = 0;
-        const maxAttempts = Math.max(this.keys.length * 2, 20); // Allow more attempts for massive batch
+        const maxAttempts = Math.max(this.keys.length * 2, 20);
 
         while (attempts < maxAttempts) {
             let currentKey = this.getNextAvailableKey();
@@ -217,76 +214,46 @@ class KeyManager {
 
             if (!currentKey) {
                 attempts++;
-                const waitTime = 60000; // Nghỉ đúng 60s như yêu cầu
+                const waitTime = 15000; // Giảm xuống 15s để Checkpoint nhanh hơn nếu hết Key
                 console.log(`${COLORS.yellow}⏳ Đang đợi ${waitTime / 1000}s cho Key hồi phục... (lượt thử ${attempts}/${maxAttempts})${COLORS.reset}`);
                 await new Promise(r => setTimeout(r, waitTime));
-                // Note: Trạng thái BUSY sẽ tự hồi phục trong getNextAvailableKey() dựa trên timestamp
                 continue;
             }
 
             const keyIdx = this.keys.indexOf(currentKey);
             const keyDisplay = currentKey.length > 10 ? `...${currentKey.substring(currentKey.length - 10)}` : currentKey;
             const proxyLog = currentProxy ? ` qua Proxy ${currentProxy.split(':')[0]}...` : "";
-            console.log(`${COLORS.cyan}🔑 Sử dụng Key ${keyIdx}: ${keyDisplay}${proxyLog}${COLORS.reset}`);
+            console.log(`${COLORS.cyan}🔑 [Sử dụng Key ${keyIdx}] ${keyDisplay}${proxyLog}${COLORS.reset}`);
 
             try {
+                // Return Proxy for the API function to use HttpsProxyAgent
                 const result = await apiCallFunction(currentKey, currentProxy);
-                this.markKeyCooling(currentKey); // ✅ Kích hoạt cơ chế nghỉ để xoay vòng key
+                this.markKeyCooling(currentKey);
                 return result;
             } catch (error) {
-                if (!error) error = new Error("Unknown error (null caught)");
-                const errMsg = error.message || "";
+                const errMsg = (error.message || "").toLowerCase();
                 const status = error.status || (error.response ? error.response.status : null);
 
-                const isQuotaError = errMsg.includes("429") || errMsg.includes("Quota") ||
-                    errMsg.includes("Too Many Requests") || errMsg.includes("503") ||
-                    errMsg.includes("Overloaded") || status === 429 || status === 503 ||
-                    errMsg.includes("exhausted");
+                const isQuotaError = errMsg.includes("429") || errMsg.includes("quota") ||
+                    errMsg.includes("too many requests") || status === 429;
 
-                // NETWORK ERRORS (Connection Reset, DNS, etc.)
-                const isNetworkError = errMsg.includes("fetch failed") ||
-                    errMsg.includes("ECONNRESET") ||
-                    errMsg.includes("ETIMEDOUT") ||
-                    errMsg.includes("ENOTFOUND") ||
+                const isNetworkError = errMsg.includes("fetch failed") || errMsg.includes("econnreset") ||
+                    errMsg.includes("etimedout") || errMsg.includes("enotfound") ||
                     errMsg.includes("network error");
 
-                const isBlockedKey = errMsg.includes("403") || errMsg.includes("Forbidden") ||
-                    errMsg.includes("location") || status === 403;
-
-                const isDeadKey = errMsg.includes("API_KEY_INVALID") || errMsg.includes("401") ||
-                    status === 401;
-
-                if (isNetworkError) {
-                    console.error(`${COLORS.magenta}🌐 Lỗi mạng (Reset/Timeout) trên Key ${keyIdx}. Đang thử lại sau 2s...${COLORS.reset}`);
-                    attempts++;
-                    await new Promise(r => setTimeout(r, 2000));
-                    continue; // RETRY WITHOUT MARKING BUSY
-                } else if (isQuotaError) {
-                    console.log(`${COLORS.yellow}⚠️ Lỗi Quota/Server (Status: ${status}) trên Key ${keyIdx}: ${errMsg.substring(0, 150)}${COLORS.reset}`);
+                if (isQuotaError) {
+                    console.log(`${COLORS.yellow}⚠️ Key ${keyIdx} bị giới hạn (429/Quota). Đang xoay vòng...${COLORS.reset}`);
                     this.markKeyBusy(currentKey);
                     attempts++;
-                    await new Promise(r => setTimeout(r, 1000));
-                } else if (isBlockedKey) {
-                    console.error(`${COLORS.red}❌ Key ${keyIdx} Blocked (403). Xóa tạm thời.${COLORS.reset}`);
-                    try {
-                        const path = require('path');
-                        const fs = require('fs');
-                        fs.appendFileSync(path.join(__dirname, '../../DEAD_KEYS.txt'), `${new Date().toLocaleString()} - Blocked (403): ${currentKey}\n`);
-                    } catch (e) { }
-                    this.keys.splice(keyIdx, 1);
-                    if (this.currentIndex >= this.keys.length) this.currentIndex = 0;
-                } else if (isDeadKey) {
-                    console.log(`${COLORS.red}💀 Lỗi Key không hợp lệ trên Key ${keyIdx}: ${errMsg.substring(0, 100)}${COLORS.reset}`);
-                    try {
-                        const path = require('path');
-                        const fs = require('fs');
-                        fs.appendFileSync(path.join(__dirname, '../../DEAD_KEYS.txt'), `${new Date().toLocaleString()} - Dead (401/Invalid): ${currentKey}\n`);
-                    } catch (e) { }
-                    this.markKeyDead(currentKey);
+                    await new Promise(r => setTimeout(r, 2000));
+                } else if (isNetworkError) {
+                    console.warn(`${COLORS.magenta}🌐 Lỗi mạng trên Key ${keyIdx}. Đang giải phóng Key và thử lại...${COLORS.reset}`);
+                    this.keyStatus[currentKey].status = 'LIVE'; // Reset to LIVE to try again
                     attempts++;
-                    await new Promise(r => setTimeout(r, 1000));
+                    await new Promise(r => setTimeout(r, 2000));
                 } else {
-                    console.error(`${COLORS.red}❌ Lỗi nghiêm trọng với Key ${keyIdx}:${COLORS.reset}`, errMsg);
+                    // Critical or unknown error
+                    this.keyStatus[currentKey].status = 'LIVE'; // Release key
                     throw error;
                 }
             }
@@ -295,23 +262,16 @@ class KeyManager {
     }
 
     getStatusSummary() {
-        const summary = { live: 0, busy: 0, cooling: 0, dead: 0 };
+        const summary = { live: 0, busy: 0, cooling: 0, dead: 0, in_use: 0 };
         this.keys.forEach(key => {
             const status = this.keyStatus[key]?.status || 'LIVE';
             if (status === 'LIVE') summary.live++;
             else if (status === 'BUSY') summary.busy++;
             else if (status === 'COOLING') summary.cooling++;
             else if (status === 'DEAD') summary.dead++;
+            else if (status === 'IN_USE') summary.in_use++;
         });
         return summary;
-    }
-
-    getKeyStatuses() {
-        const results = {};
-        this.keys.forEach(key => {
-            results[key] = this.keyStatus[key]?.status || 'LIVE';
-        });
-        return results;
     }
 }
 

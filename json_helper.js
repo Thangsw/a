@@ -1,20 +1,39 @@
 function parseAIJSON(text, context = "Unknown") {
     if (!text) return null;
     try {
-        // 1. Basic Cleaning
-        let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-        clean = clean.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "");
+        // 1. Deep Cleaning
+        // Remove markdown fences first
+        let clean = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+        // Remove non-printable characters
+        clean = clean.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, "").trim();
 
-        // 2. Try Standard Parse first (after deep cleaning)
-        const jsonMatch = clean.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-        if (jsonMatch) {
-            const potential = jsonMatch[0];
+        // 2. Identify JSON Boundaries (Aggressive)
+        const firstCurly = clean.indexOf('{');
+        const firstBracket = clean.indexOf('[');
+        const lastCurly = clean.lastIndexOf('}');
+        const lastBracket = clean.lastIndexOf(']');
+
+        let start = -1;
+        let end = -1;
+
+        // Prefer the outer-most structure
+        if (firstCurly !== -1 && (firstBracket === -1 || firstCurly < firstBracket)) {
+            start = firstCurly;
+            end = lastCurly;
+        } else if (firstBracket !== -1) {
+            start = firstBracket;
+            end = lastBracket;
+        }
+
+        if (start !== -1 && end !== -1 && end > start) {
+            const jsonBody = clean.substring(start, end + 1);
             try {
-                const parsed = JSON.parse(potential);
+                const parsed = JSON.parse(jsonBody);
                 if (Array.isArray(parsed)) return parsed.length > 0 ? parsed : null;
                 if (typeof parsed === 'object' && parsed !== null) return [parsed];
             } catch (e) {
-                // Parse failed, proceed to salvage
+                console.warn(`⚠️ [JSON Parser][${context}] JSON.parse failed on extracted body: ${e.message}`);
+                // Proceed to salvage
             }
         }
 

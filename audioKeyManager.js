@@ -15,6 +15,7 @@ const EXHAUSTED_KEYS = new Set(); // In-memory track for 429/Quota errors in cur
 
 // Default settings
 const DEFAULT_MODEL = 'gemini-3-flash-preview';
+const FALLBACK_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 const DEFAULT_DAILY_LIMIT = 20;
 
 /**
@@ -213,44 +214,56 @@ function updateSettings(settings) {
 }
 
 /**
- * Executes an AI call with automatic key rotation.
- * Tries ALL configured keys before giving up.
+ * Executes an AI call with automatic key rotation and model fallback.
+ * Tries ALL configured keys for each model in sequence.
  */
-async function executeWithRotation(apiCallFunction, modelName) {
+async function executeWithRotation(apiCallFunction) {
     const keys = getAudioKeys();
     const usageData = loadUsageData();
     const dailyLimit = usageData.dailyLimit || DEFAULT_DAILY_LIMIT;
     let lastError = null;
 
-    // Try all keys starting from current index
-    const startIndex = usageData.currentIndex || 0;
+    // Try each model in the fallback sequence
+    for (const modelName of FALLBACK_MODELS) {
+        console.log(`🤖 [AudioKey] Attempting with model: ${modelName}`);
 
-    for (let i = 0; i < keys.length; i++) {
-        const idx = (startIndex + i) % keys.length;
-        const key = keys[idx];
+        // Try all keys for the current model
+        const startIndex = usageData.currentIndex || 0;
+        const keyManager = require('./keyManager'); // Import inside to fetch proxy
 
-        if (EXHAUSTED_KEYS.has(key)) continue;
-        const usage = usageData.usage[key] || 0;
-        if (usage >= dailyLimit) continue;
+        for (let i = 0; i < keys.length; i++) {
+            const idx = (startIndex + i) % keys.length;
+            const key = keys[idx];
+            const currentProxy = keyManager.getNextProxy(); // Rotating proxy for each attempt
 
-        try {
-            const result = await apiCallFunction(key);
-            // If successful, increment usage and return
-            incrementUsage(key);
-            return result;
-        } catch (err) {
-            lastError = err;
-            const errMsg = err.message.toLowerCase();
-            if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('exhausted') || errMsg.includes('503') || errMsg.includes('overloaded')) {
-                markKeyExhausted(key);
-                console.warn(`⚠️ [AudioKey] Key index ${idx} failed with quota/overload. Rotated.`);
+            if (EXHAUSTED_KEYS.has(key)) continue;
+            const usage = usageData.usage[key] || 0;
+            if (usage >= dailyLimit) continue;
+
+            try {
+                // Pass the model and proxy to the api call
+                const result = await apiCallFunction(key, modelName, currentProxy);
+                // If successful, increment usage and return
+                incrementUsage(key);
+                return result;
+            } catch (err) {
+                lastError = err;
+                const errMsg = err.message.toLowerCase();
+                // If specifically a quota/overload error, mark key as exhausted for this session
+                if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('exhausted') || errMsg.includes('503') || errMsg.includes('overloaded')) {
+                    markKeyExhausted(key);
+                    console.warn(`⚠️ [AudioKey] Key index ${idx} failed with quota/overload for ${modelName}. Rotated.`);
+                    continue;
+                }
+                // If the error is model-specific or other, we might still want to try the next key or next model
+                console.warn(`⚠️ [AudioKey] Key index ${idx} failed for ${modelName}: ${err.message}`);
                 continue;
             }
-            throw err; // Other errors should stop the process
         }
+        console.warn(`📡 [AudioKey] All keys exhausted or failed for ${modelName}. Falling back to next model...`);
     }
 
-    throw new Error(`Đã thử TẤT CẢ các API Key chuyên dụng cho ${modelName} nhưng đều thất bại (Hết quota hoặc máy chủ quá tải).`);
+    throw new Error(`Đã thử TẤT CẢ các API Key và Model dự phòng (Gemini 3, 2.5, 2.5-Lite) nhưng đều thất bại.`);
 }
 
 module.exports = {
@@ -265,5 +278,6 @@ module.exports = {
     updateSettings,
     executeWithRotation,
     DEFAULT_MODEL,
-    DEFAULT_DAILY_LIMIT
+    DEFAULT_DAILY_LIMIT,
+    FALLBACK_MODELS
 };

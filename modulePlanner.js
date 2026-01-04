@@ -4,21 +4,37 @@ const db = require('./database');
 const { log } = require('./colors');
 const { parseAIJSON } = require('./json_helper');
 const nicheManager = require('./nicheManager');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
 /**
  * SHU Step 3: Module Planning Engine
  */
 
-async function planModules(projectId, analyzedData, feedback = null, niche = 'dark_psychology_de', targetWords = null) {
+async function planModules(projectId, analyzedData, feedback = null, niche = 'dark_psychology_de', targetWords = null, contentMode = 'SHU') {
     const nicheProfile = nicheManager.getProfile(niche);
+    const isLegoMicro = contentMode === 'LEGO_MICRO';
 
-    // Auto-detect targetWords if missing
-    if (!targetWords) {
-        targetWords = nicheProfile.pipeline_settings?.target_words_per_block || 1500;
-        if (niche === 'dark_psychology_de') targetWords = 4500; // Total for 3 units
+    // DYNAMIC CONFIG (Auto-distribute targetWords)
+    let moduleCount = isLegoMicro ? 4 : 8;
+    let baseTarget = targetWords || nicheProfile.pipeline_settings?.target_words_per_block || (isLegoMicro ? 1500 : 4000);
+
+    // Distribution logic (Professional Arc Ratios)
+    let wordPerModule = [];
+    if (isLegoMicro) {
+        // [20%, 30%, 30%, 20%]
+        wordPerModule = [
+            Math.floor(baseTarget * 0.20),
+            Math.floor(baseTarget * 0.30),
+            Math.floor(baseTarget * 0.30),
+            Math.floor(baseTarget * 0.20)
+        ];
+    } else {
+        // Equal distribution for long SHU
+        const avg = Math.floor(baseTarget / 8);
+        wordPerModule = new Array(8).fill(avg);
     }
 
-    log.info(`🧠 [SHU Bước 3] Đang lập kế hoạch module cho Dự án: ${projectId} (Ngách: ${niche}, Mục tiêu: ${targetWords} từ)${feedback ? " (Đang tinh chỉnh dựa trên phản hồi)" : ""}`);
+    log.info(`🧠 [SHU Bước 3] Mode: ${contentMode} | Dự án: ${projectId} (Ngách: ${niche}) | Module Count: ${moduleCount}`);
 
     const validRoles = nicheManager.getRoles(niche);
 
@@ -26,46 +42,36 @@ async function planModules(projectId, analyzedData, feedback = null, niche = 'da
 You are a senior YouTube editor specializing in ${nicheProfile.writer_role}.
 
 TASK:
-${feedback ? `REFINE the following module plan based on the provided feedback to improve narrative flow, tension building, and keyword placement.
+Plan exactly ${moduleCount} modules for a ${isLegoMicro ? 'MICRO-VIDEO (12-15 min standalone)' : 'long-form YouTube'} ${niche} video.
 
-RULES FOR REFINEMENT:
-- Do NOT change the total number of modules.
-- Do NOT remove HOOK or OPEN_END.
-- Improve narrative flow and escalation.
-- Adjust goals to be sharper and more focused.
-- Ensure only the requested roles are used.
-- You MUST preserve the original role order defined by the niche role map.
-
-FEEDBACK TO FIX:
-${JSON.stringify(feedback)}
-
-CURRENT PLAN TO REFINE (Base Plan):
-${JSON.stringify(feedback?.module_plan || analyzedData.module_plan)}` : `Plan the optimal module structure for a long-form YouTube ${niche} video.`}
-
-CONSTRUCTED CONTEXT:
-- Niche: ${niche}
-- Tone Strategy: ${Array.isArray(nicheProfile.tone) ? nicheProfile.tone.join(", ") : nicheProfile.tone}
-- Dominant emotion: ${analyzedData.dominant_trigger}
-- Hook strength score: ${analyzedData.hook_score}
-- Core Keyword: ${analyzedData.core_keyword || "N/A"}
+${isLegoMicro ? `
+STRICT RULES FOR LEGO_MICRO (4 MODULES):
+1. Module 1: Role 'HOOK_THREAT' (Short, sharp, intense)
+2. Module 2: Role 'MECHANISM_EXPOSED' (Explain exactly ONE mechanism)
+3. Module 3: Role 'BOUNDARY_DEFINITION' (GOAL: POWER_IMBALANCE + BOUNDARY_DEFINITION - Who benefits & boundaries)
+4. Module 4: Role 'OPEN_LOOP' (GOAL: COLD_RESOLUTION + OPEN_LOOP - How to fix & expansion)
+` : `
+RULES FOR SHU_LONG (8 MODULES):
+- First module must be HOOK_THREAT.
+- Single-Peak approach (Climax at peak role).
+- Final module must be OPEN_LOOP.
+`}
 
 RULES:
-- Total modules must be between 8 and 10
-- Each module must have a clear narrative role
-- Structure must escalate tension gradually (Single-Peak approach)
-- IMPORTANT: You MUST choose exactly ONE role from the peak role list (PEAK, REALIZATION, TURNING_POINT, SHIFT, COLD_RESOLUTION) to serve as the narrative climax. Do NOT use more than one peak role in your plan.
-- Final module must leave an open loop (no conclusion)
+- Exact module count: ${moduleCount}
+- Module index MUST start at 1 and be sequential.
+- Output ONLY JSON.
 
 AVAILABLE MODULE ROLES:
 ${validRoles.join("\n")}
 
-OUTPUT FORMAT (JSON ONLY):
+OUTPUT FORMAT(JSON ONLY):
 [
-  {
-    "index": 1,
-    "role": "HOOK",
-    "goal": "..."
-  }
+    {
+        "index": 1,
+        "role": "...",
+        "goal": "..."
+    }
 ]
 `;
 
@@ -75,68 +81,31 @@ OUTPUT FORMAT (JSON ONLY):
         try {
             const aiPlan = await executeAIPlanner(projectId, prompt);
 
-            if (!Array.isArray(aiPlan)) {
-                throw new Error("AI failed to return a valid module list.");
+            if (!Array.isArray(aiPlan) || aiPlan.length !== moduleCount) {
+                throw new Error(`AI failed to return exactly ${moduleCount} modules(Got: ${aiPlan?.length})`);
             }
 
-            // B3.3: Tool Enrichment (Rule-based)
-            const enrichedModules = aiPlan.map(module => {
-                if (!validRoles.includes(module.role)) {
-                    throw new Error(`Invalid module role from AI: ${module.role}`);
-                }
-
-                let word_target = 500;
-                let allowed_keyword_type = ["support"];
-
-                const roleProps = nicheManager.getRoleProperty(module.role);
-                const wordBias = roleProps.word_bias || 0;
-
-                if (nicheProfile.keyword_discipline === "loose") {
-                    allowed_keyword_type = [];
-                }
-
-                const scaleFactor = targetWords / 5000;
-
-                switch (module.role) {
-                    case "HOOK":
-                        word_target = Math.round((120 + wordBias) * Math.max(0.8, scaleFactor));
-                        if (nicheProfile.keyword_discipline !== "loose") allowed_keyword_type = ["core", "ctr"];
-                        break;
-                    case "PEAK":
-                    case "REALIZATION":
-                    case "TURNING_POINT":
-                    case "SHIFT":
-                    case "COLD_RESOLUTION":
-                        word_target = Math.round((650 + wordBias) * (targetWords / 5000));
-                        if (analyzedData.hook_score < 7) {
-                            word_target = Math.round((500 + wordBias) * (targetWords / 5000));
-                        }
-                        if (nicheProfile.keyword_discipline !== "loose") allowed_keyword_type = ["core", "support"];
-                        break;
-                    case "OPEN_END":
-                    case "OPEN_LOOP":
-                        word_target = Math.round((300 + wordBias) * (targetWords / 5000));
-                        if (nicheProfile.keyword_discipline !== "loose") allowed_keyword_type = ["core"];
-                        break;
-                    default:
-                        word_target = Math.round((550 + wordBias) * (targetWords / 5000));
-                        break;
-                }
+            // Enrichment with HARDCODED word targets
+            const enrichedModules = aiPlan.map((m, i) => {
+                const roleProps = nicheManager.getRoleProperty(m.role);
+                const word_target = wordPerModule[i] || (isLegoMicro ? 350 : 500);
 
                 return {
-                    ...module,
+                    ...m,
                     word_target,
-                    allowed_keyword_type
+                    allowed_keyword_type: (nicheProfile.keyword_discipline === "loose") ? [] : ["core", "support"],
+                    intensity: roleProps?.intensity || "medium",
+                    status: "planned"
                 };
             });
 
-            validateModulePlan(enrichedModules);
+            validateModulePlan(enrichedModules, niche, contentMode);
 
             const totalWords = enrichedModules.reduce((sum, m) => sum + m.word_target, 0);
 
             await db.saveModulePlan(projectId, {
                 modules: enrichedModules,
-                version: "v1.0",
+                version: "v2.0_hardcoded",
                 hook_score: analyzedData.hook_score,
                 total_word_estimate: totalWords
             });
@@ -147,45 +116,46 @@ OUTPUT FORMAT (JSON ONLY):
                 status: "ready_for_module_generation"
             };
 
-            log.success(`✅ Bước 3 Hoàn tất: Đã lập kế hoạch cho ${enrichedModules.length} modules (Lượt thử: ${attempts}).`);
+            log.success(`✅ Bước 3 Hoàn tất: Đã chốt ${enrichedModules.length} modules(${totalWords} từ).`);
             return finalResult;
 
         } catch (err) {
-            log.warn(`⚠️ Bước 3 - Lượt thử ${attempts} thất bại: ${err.message}`);
+            log.warn(`⚠️ Bước 3 - Lượt thử ${attempts} thất bại: ${err.message} `);
             if (attempts === 3) throw err;
             await new Promise(r => setTimeout(r, 1000));
         }
     }
 }
 
-function validateModulePlan(modules) {
-    if (modules.length < 8 || modules.length > 10) {
-        throw new Error(`Số lượng module không hợp lệ: ${modules.length}. Phải từ 8-10.`);
+function validateModulePlan(modules, niche = 'dark_psychology_de', contentMode = 'SHU') {
+    const isLegoMicro = contentMode === 'LEGO_MICRO';
+    const expectedCount = isLegoMicro ? 4 : 8;
+
+    if (!Array.isArray(modules) || modules.length !== expectedCount) {
+        throw new Error(`Số lượng module không hợp lệ: ${modules.length}. Kỳ vọng: ${expectedCount}.`);
     }
+
+    const validRoles = nicheManager.getRoles(niche);
 
     modules.forEach((m, i) => {
         if (m.index !== i + 1) {
             throw new Error(`Index module không liên tục tại vị trí ${i} (Kỳ vọng ${i + 1}, nhận được ${m.index})`);
         }
+        if (!validRoles.includes(m.role)) {
+            throw new Error(`Invalid module role: ${m.role} `);
+        }
     });
 
-    const roles = modules.map(m => m.role);
-
-    if (modules[0].role !== "HOOK") {
-        throw new Error("Module đầu tiên phải là HOOK");
+    if (modules[0].role !== "HOOK_THREAT" && modules[0].role !== "HOOK") {
+        throw new Error(`Module đầu tiên phải là HOOK_THREAT / HOOK`);
     }
-
-    const peakRoles = ["PEAK", "REALIZATION", "TURNING_POINT", "SHIFT", "COLD_RESOLUTION"];
-    const foundPeak = roles.filter(r => peakRoles.includes(r));
-    if (foundPeak.length !== 1) {
-        throw new Error(`Số lượng PEAK không hợp lệ: ${foundPeak.length} (${foundPeak.join(", ")}). Phải có đúng 1 peak role (${peakRoles.join(", ")}).`);
-    }
-
-    if (!roles.includes("HOOK") && !roles.includes("HOOK_THREAT")) throw new Error("Thiếu module HOOK");
 
     const lastModule = modules[modules.length - 1];
-    if (lastModule.role !== "OPEN_END" && lastModule.role !== "OPEN_LOOP") {
-        throw new Error(`Module cuối cùng phải là OPEN_END hoặc OPEN_LOOP, nhưng nhận được ${lastModule.role}`);
+    if (!["OPEN_LOOP", "OPEN_END", "COLD_RESOLUTION"].includes(lastModule.role)) {
+        // We allow COLD_RESOLUTION for LEGO_MICRO as it merges with OPEN_LOOP
+        if (!isLegoMicro || lastModule.role !== "COLD_RESOLUTION") {
+            throw new Error(`Module cuối cùng không hợp lệ: ${lastModule.role} `);
+        }
     }
 
     const totalWords = modules.reduce((sum, m) => sum + m.word_target, 0);
@@ -193,18 +163,26 @@ function validateModulePlan(modules) {
 }
 
 async function executeAIPlanner(projectId, prompt) {
+    // UPDATED MODEL PRIORITY: No 1.5, No 2.0
     const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemma-3-27b-it'];
     let lastError = null;
 
     for (const modelName of MODEL_PRIORITY) {
         try {
-            return await keyManager.executeWithRetry(async (apiKey) => {
+            return await keyManager.executeWithRetry(async (apiKey, proxy) => {
+                const proxyUrl = keyManager.formatProxyUrl(proxy);
+                const agent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : null;
+
                 const genAI = new GoogleGenerativeAI(apiKey);
-                log.info(`🤖 Đang lập kế hoạch [Model: ${modelName}] bằng một API Key khả dụng...`);
+                log.info(`🤖 Đang lập kế hoạch[Model: ${modelName}]...`);
+
                 const model = genAI.getGenerativeModel({
                     model: modelName,
                     apiVersion: 'v1beta',
                     generationConfig: { maxOutputTokens: 8192, temperature: 0.7 }
+                }, {
+                    timeout: 60000,
+                    httpOptions: agent ? { agent } : undefined
                 });
 
                 const result = await model.generateContent(prompt);
@@ -225,7 +203,7 @@ async function executeAIPlanner(projectId, prompt) {
             lastError = err;
             const errMsg = err.message.toLowerCase();
             if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('503') || errMsg.includes('overloaded') || errMsg.includes('exhausted')) {
-                log.warn(`⚠️ Model ${modelName} thất bại trên TẤT CẢ các Keys. Đang thử model tiếp theo...`);
+                log.warn(`⚠️ Model ${modelName} thất bại.Đang thử model tiếp theo...`);
                 continue;
             }
             throw err;

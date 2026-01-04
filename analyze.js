@@ -1,111 +1,89 @@
-const fs = require('fs');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { GoogleAIFileManager } = require("@google/generative-ai/files");
 const path = require('path');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { GoogleAIFileManager, FileState } = require('@google/generative-ai/files');
+const fs = require('fs');
+const pLimit = require('p-limit');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 const ytDlp = require('yt-dlp-exec');
-const audioKeyManager = require('./audioKeyManager');
-const { getProfileData } = require('./profiles');
-const { log } = require('./colors');
+const crypto = require('crypto');
+
+const log = require('./colors').log;
 const db = require('./database');
-const { sendTelegramMessage } = require('./notifier');
+const keyManager = require('./keyManager');
+const audioKeyManager = require('./audioKeyManager');
 const nicheManager = require('./nicheManager');
-const keyManager = require('./keyManager'); // Use standard keyManager for non-audio parts if needed
-
-// Helper for Audio Mime Types
-function getAudioMimeType(ext) {
-    if (ext === '.webm') return 'audio/webm';
-    if (ext === '.m4a') return 'audio/mp4';
-    if (ext === '.mp3') return 'audio/mp3';
-    if (ext === '.wav') return 'audio/wav';
-    return 'audio/mpeg';
-}
-
-// Helper to wait for file active state
-async function waitForFilesActive(fileManager, files) {
-    log.progress("⏳ Đang chờ Gemini xử lý file...");
-    for (const file of files) {
-        let fileStatus = await fileManager.getFile(file.name);
-        while (fileStatus.state === FileState.PROCESSING) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            fileStatus = await fileManager.getFile(file.name);
-        }
-        if (fileStatus.state === FileState.FAILED) {
-            throw new Error("File processing failed on Gemini.");
-        }
-    }
-    log.success("✅ File đã sẵn sàng để phân tích.");
-}
-
-const keywordEngine = require('./keywordEngine');
 const modulePlanner = require('./modulePlanner');
 const checkpointEngine = require('./checkpointEngine');
 const scriptGenerator = require('./scriptGenerator');
 const scriptAssembler = require('./scriptAssembler');
-const ctrEngine = require('./ctrEngine');
+const keywordEngine = require('./keywordEngine');
 const descriptionEngine = require('./descriptionEngine');
+const ctrEngine = require('./ctrEngine');
 const pipeline = require('./pipeline');
 const microTopicGenerator = require('./microTopicGenerator');
 const compilationAssembler = require('./compilationAssembler');
+const { parseAIJSON } = require('./json_helper');
 
-const crypto = require('crypto');
-
-/**
- * Step 1 & 1.5: Content Analyzer & Hook scoring
- */
 async function analyzeContent(req, res) {
-    let { url, modelName, manualScript, projectId, profileId, niche = 'dark_psychology_de', targetLanguage, word_count, output_dir = 'output', legoMode = true } = req.body;
-
-    const nicheProfile = nicheManager.getProfile(niche);
-
-    // Auto-detect defaults from niche if missing
-    if (!targetLanguage) targetLanguage = nicheProfile.language || 'English';
-    if (!word_count) {
-        if (legoMode && niche === 'dark_psychology_de') {
-            word_count = 4500; // 3 units x 1500
-        } else {
-            word_count = nicheProfile.pipeline_settings?.target_words_per_block || 1500;
-        }
-    }
-
-    if (!profileId || profileId === 'null') return res.json({ success: false, error: 'Vui lòng chọn Kênh (Profile) trước khi chạy!' });
-
-    // Auto-Project Creation if missing
-    if (!projectId || projectId === 'null') {
-        try {
-            log.info("🔍 Đang tự động tạo Dự án mới...");
-            let projectTitle = `Project_${new Date().getTime()}`;
-
-            if (url) {
-                try {
-                    const info = await ytDlp(url, { dumpJson: true, noWarnings: true, quiet: true });
-                    const jsonInfo = JSON.parse(info.stdout);
-                    if (jsonInfo.title) projectTitle = jsonInfo.title;
-                } catch (e) { log.warn("⚠️ Không lấy được tiêu đề video, dùng tên mặc định."); }
-            }
-
-            const newId = await db.createProject(profileId, projectTitle, 'GENERAL');
-            projectId = newId;
-            log.success(`✨ Đã tự động tạo Dự án: ${projectTitle} (ID: ${projectId})`);
-        } catch (dbErr) {
-            log.error("❌ Lỗi tự động tạo Project:", dbErr.message);
-        }
-    }
-
-    if (!url && !manualScript) return res.json({ success: false, error: 'URL or Manual Script is required' });
-
-    let audioPath = null;
-
     try {
-        const isManual = !!manualScript;
-        const manualScriptText = manualScript;
+        log.info(`[DEBUG] analyzeContent input body: ${JSON.stringify(req.body)}`);
+        let { projectId, audioPath, url, niche, targetLanguage, word_count, profileId, output_dir, legoMode, isManual, manualScriptText, voice_service, voiceService } = req.body;
 
-        if (!isManual) {
-            // AUDIO CACHING LOGIC
+        // 1. EXTRACT VOICE SERVICE (Multi-source detection)
+        let activeVoiceService = voice_service || voiceService;
+
+        // Check depth if nested in body
+        if ((!activeVoiceService || activeVoiceService === 'none') && req.body.voice_settings?.voice_service) {
+            activeVoiceService = req.body.voice_settings.voice_service;
+        }
+
+        // Check Profile Fallback
+        if (!activeVoiceService || activeVoiceService === 'none') {
+            if (profileId) {
+                const profileData = require('./profiles').getProfileData(profileId);
+                if (profileData) {
+                    activeVoiceService = profileData.voice_service || profileData.voice_settings?.voice_service || profileData.voice_settings?.voiceService;
+                    if (activeVoiceService) log.info(`📋 [Analyze] Recovered voice_service from profile: ${activeVoiceService}`);
+                }
+            }
+        }
+
+        // final Niche Fallback (Last resort for dark_psychology_de)
+        if ((!activeVoiceService || activeVoiceService === 'none') && niche === 'dark_psychology_de') {
+            activeVoiceService = 'ai84'; // Default for this niche
+            log.info(`🛠️ [Analyze] Force-default voice_service to 'ai84' for Dark Psychology niche.`);
+        }
+
+        if (!activeVoiceService || activeVoiceService === 'none') {
+            throw new Error("❌ Error: Voice Service is MANDATORY. Please select AI84 or AI33 before running.");
+        }
+
+        // 2. AUTO-PROJECT CREATION (If missing)
+        if (!projectId || projectId === 'null') {
+            try {
+                log.info("🔍 Đang tự động tạo Dự án mới...");
+                let projectTitle = `Project_${new Date().getTime()}`;
+                if (url) {
+                    try {
+                        const info = await ytDlp(url, { dumpJson: true, noWarnings: true, quiet: true });
+                        const jsonInfo = JSON.parse(info.stdout);
+                        if (jsonInfo.title) projectTitle = jsonInfo.title;
+                    } catch (e) { log.warn("⚠️ Không lấy được tiêu đề video, dùng tên mặc định."); }
+                }
+                const newId = await db.createProject(profileId || 1, projectTitle, 'GENERAL');
+                projectId = newId;
+                log.success(`✨ Đã tự động tạo Dự án: ${projectTitle} (ID: ${projectId})`);
+            } catch (dbErr) {
+                log.error("❌ Lỗi tự động tạo Project:", dbErr.message);
+            }
+        }
+
+        // 3. YOUTUBE DOWNLOAD & CACHING
+        if (!isManual && url && !audioPath) {
             const urlHash = crypto.createHash('md5').update(url).digest('hex');
             const cacheDir = path.join(__dirname, '../../temp/cache_audio');
             if (!fs.existsSync(cacheDir)) fs.mkdirSync(cacheDir, { recursive: true });
 
-            // Check if cached file exists
             const extensions = ['.webm', '.m4a', '.mp3', '.opus', '.wav'];
             for (const ext of extensions) {
                 const checkPath = path.join(cacheDir, `${urlHash}${ext}`);
@@ -117,13 +95,10 @@ async function analyzeContent(req, res) {
             }
 
             if (!audioPath) {
-                const tempId = Date.now();
                 const outputTemplate = path.join(cacheDir, `${urlHash}.%(ext)s`);
                 log.progress(`⬇️ Đang tải âm thanh mới từ ${url}...`);
-
                 try {
                     await ytDlp(url, { format: 'bestaudio', output: outputTemplate, noPlaylist: true, quiet: true, noWarnings: true });
-
                     for (const ext of extensions) {
                         const checkPath = path.join(cacheDir, `${urlHash}${ext}`);
                         if (fs.existsSync(checkPath)) {
@@ -132,21 +107,20 @@ async function analyzeContent(req, res) {
                         }
                     }
                 } catch (dlErr) {
-                    console.error(`❌ Lỗi YT-DLP:`, dlErr.message);
-                    throw new Error(`Tải âm thanh thất bại. Kiểm tra URL hoặc mạng.`);
+                    throw new Error(`Tải âm thanh thất bại: ${dlErr.message}`);
                 }
             }
-
-            if (!audioPath) throw new Error("Tải âm thanh thất bại.");
+            if (!audioPath) throw new Error("Không thể tải hoặc tìm thấy tệp âm thanh.");
         }
 
+        log.info(`🚀 [Analyze] Pipeline Start: Project ${projectId} | Mode: ${legoMode ? 'LEGO' : 'SHU'} | Niche: ${niche} | Voice: ${activeVoiceService}`);
+
         const promptStep1 = `
-You are a content analyst specialized in YouTube psychology and explainer-style videos.
-STRICT RULES:
-- Do NOT rewrite or paraphrase
-- hooks and phrases must be copied EXACTLY
+Phân tích nội dung và trích xuất thông tin theo cấu trúc JSON. 
+Niche: ${niche}
+Language: ${targetLanguage}
 - Output ONLY JSON
-EXTRACT: hook_candidates (top 3), repeated_phrases, emotion_triggers, narrative_structure, self_evaluation.
+EXTRACT: core_keyword, dominant_trigger, hook_candidates (top 3), repeated_phrases, emotion_triggers, narrative_structure, self_evaluation.
 `;
 
         const promptStep15 = `
@@ -154,294 +128,207 @@ You are a YouTube hook evaluator. Evaluate hook strength (1-10).
 OUTPUT JSON: { "hook_score": 0.0, "dominant_trigger": "...", "ctr_potential": "high/med/low", "recommendation": "proceed/rewrite/reject" }
 `;
 
-        // Pass legoMode and output_dir explicitly
-        const finalResult = await executeAIAnalysis(projectId, promptStep1, promptStep15, isManual, manualScriptText, audioPath, niche, targetLanguage, word_count, profileId, output_dir, legoMode);
-
+        const finalResult = await executeAIAnalysis(projectId, promptStep1, promptStep15, isManual, manualScriptText, audioPath, niche, targetLanguage, word_count, profileId, output_dir, legoMode, activeVoiceService);
         res.json({ success: true, data: finalResult, projectId });
 
     } catch (err) {
         log.error(`❌ Lỗi SHU Analyzer: ${err.message}`);
         res.json({ success: false, error: err.message });
     }
-    // Note: We NO LONGER delete the audioPath here because it's cached.
 }
 
-async function executeAIAnalysis(projectId, prompt1, prompt15, isManual, manualScript, audioPath, niche, targetLanguage, word_count, profileId, outputDir = 'output') {
-    const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
-    let lastError = null;
+async function executeAIAnalysis(projectId, prompt1, prompt15, isManual, manualScript, audioPath, niche, targetLanguage, word_count, profileId, outputDir, legoMode, voice_service) {
+    // PRE-CHECK: Validate audio path before rotation to avoid 110x retry loop
+    if (!isManual && (!audioPath || typeof audioPath !== 'string')) {
+        throw new Error(`❌ Error: audioPath is missing or invalid (${audioPath}). Please upload/select an audio file first or use Manual Script mode.`);
+    }
 
-    for (const modelName of MODEL_PRIORITY) {
-        try {
-            // Wait, audioKeyManager usually rotates automatically via executeWithRotation.
-            // Let's use it:
-            return await audioKeyManager.executeWithRotation(async (apiKey) => {
+    return await audioKeyManager.executeWithRotation(async (apiKey, modelName, proxy) => {
+        const MODEL_PRIORITY = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+        let lastErr = null;
+
+        for (const mName of MODEL_PRIORITY) {
+            try {
+                const pxUrl = keyManager.formatProxyUrl(proxy);
+                const agent = pxUrl ? new HttpsProxyAgent(pxUrl) : null;
                 const genAI = new GoogleGenerativeAI(apiKey);
-                const fileManager = new GoogleAIFileManager(apiKey);
                 let generationContent = [];
 
                 if (isManual) {
                     generationContent = [{ text: `SCRIPT:\n${manualScript}\n\nINSTRUCTIONS:\n${prompt1}` }];
                 } else {
-                    log.info(`🤖 Đang phân tích âm thanh [Model: ${modelName}] bằng Key: ...${apiKey.slice(-4)}`);
+                    log.info(`🤖 Đang phân tích nội dung [Model: ${mName}]...`);
+                    const fileManager = new GoogleAIFileManager(apiKey);
+                    const audioExt = path.extname(audioPath);
                     const uploadResult = await fileManager.uploadFile(audioPath, {
-                        mimeType: getAudioMimeType(path.extname(audioPath)),
+                        mimeType: getAudioMimeType(audioExt),
                         displayName: "YouTube Analysis",
                     });
                     await waitForFilesActive(fileManager, [uploadResult.file]);
-
                     generationContent = [
-                        { fileData: { mimeType: getAudioMimeType(path.extname(audioPath)), fileUri: uploadResult.file.uri } },
+                        { fileData: { mimeType: getAudioMimeType(audioExt), fileUri: uploadResult.file.uri } },
                         { text: prompt1 }
                     ];
                 }
 
-                const model = genAI.getGenerativeModel({
-                    model: modelName,
-                    apiVersion: 'v1beta',
-                    generationConfig: { maxOutputTokens: 8192, temperature: 0.7 }
-                });
-
+                const model = genAI.getGenerativeModel({ model: mName, apiVersion: 'v1beta', generationConfig: { maxOutputTokens: 8192, temperature: 0.7 } }, { httpOptions: agent ? { agent } : undefined });
                 const result = await model.generateContent(generationContent);
                 const step1Json = parseAIResponse(result.response.text());
-                if (!step1Json) throw new Error("Phân tích Bước 1 không trả về JSON.");
+                if (!step1Json) throw new Error("Phân tích Bước 1 lỗi.");
 
-                // Scoring Phase
-                const nicheConfig = nicheManager.getNicheConfig(niche);
-                let fullPrompt15 = prompt15;
-                if (targetLanguage === 'German' || nicheConfig.market === 'DE') {
-                    fullPrompt15 += `\nGERMAN RULES: Focus on logic, behavioral observation, no American hype.`;
-                }
-                const scoringPrompt = `${fullPrompt15}\n\nINPUT:\n${JSON.stringify(step1Json)}`;
+                const scoringPrompt = `${prompt15}\n\nINPUT:\n${JSON.stringify(step1Json)}`;
                 const scoringResult = await model.generateContent(scoringPrompt);
                 const step15Json = parseAIResponse(scoringResult.response.text());
-                if (!step15Json) throw new Error("Bước 1.5 Scoring không trả về JSON.");
 
                 let finalResult = { ...step1Json, ...step15Json };
-
-                // Downstream Pipeline
                 if (finalResult.recommendation !== 'reject') {
-                    finalResult = await runDownstreamPipeline(projectId, finalResult, niche, targetLanguage, word_count, profileId, outputDir, legoMode);
+                    finalResult = await runDownstreamPipeline(projectId, finalResult, niche, targetLanguage, word_count, profileId, outputDir, legoMode, voice_service);
                 }
 
-                // Persistence
                 if (projectId) {
-                    await db.db.run('UPDATE projects SET analysis_result = ?, status = ? WHERE id = ?',
-                        [JSON.stringify(finalResult), finalResult.recommendation === 'reject' ? 'rejected' : 'planned', projectId]);
-
-                    if (finalResult.recommendation === 'reject') {
-                        await sendTelegramMessage(`🚫 [SHU REJECTED] Score: ${finalResult.hook_score}/10. Niche: ${niche}`);
-                    }
+                    await db.db.run('UPDATE projects SET analysis_result = ?, status = ? WHERE id = ?', [JSON.stringify(finalResult), finalResult.recommendation === 'reject' ? 'rejected' : 'planned', projectId]);
                 }
-
                 return finalResult;
-            }, modelName); // Pass modelName to instruction rotation
-
-        } catch (err) {
-            lastError = err;
-            const errMsg = err.message.toLowerCase();
-            if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('503') || errMsg.includes('overloaded') || errMsg.includes('exhausted')) {
-                log.warn(`⚠️ Model ${modelName} thất bại trên TẤT CẢ các Keys. Đang thử model tiếp theo...`);
+            } catch (e) {
+                lastErr = e;
+                log.warn(`⚠️ Model ${mName} gặp sự cố: ${e.message}`);
                 continue;
             }
-            throw err;
         }
-    }
-    throw lastError;
+        throw lastErr;
+    });
 }
 
-async function runDownstreamPipeline(projectId, finalResult, niche, targetLanguage, word_count, profileId, outputDir = 'output', legoMode = true) {
-    let microTopics = [];
-    if (legoMode && niche === 'dark_psychology_de') {
+async function runDownstreamPipeline(projectId, finalResult, niche, targetLanguage, word_count, profileId, outputDir, legoMode, voice_service) {
+    const nicheProfile = nicheManager.getNicheConfig(niche);
+    const isLego = legoMode && niche === 'dark_psychology_de';
+
+    if (isLego) {
         log.info("🧱 [LEGO Mode] Đang kích hoạt quy trình Micro-Topic (3 Arcs)...");
+        const microTopics = await microTopicGenerator.generateMicroTopics(projectId, finalResult.core_keyword, finalResult.dominant_trigger, niche);
+        const arcLimit = pLimit(3); // Xử lý song song 3 Arcs
 
-        // SSE: Initialize LEGO Queue
-        if (global.sendSSE) {
-            global.sendSSE('queue_update', {
-                isLego: true,
-                items: [
-                    { id: 'block_1', name: 'Micro Clip 1', status: 'processing', progress: 10, type: 'micro' },
-                    { id: 'block_2', name: 'Micro Clip 2', status: 'pending', progress: 0, type: 'micro' },
-                    { id: 'block_3', name: 'Micro Clip 3', status: 'pending', progress: 0, type: 'micro' },
-                    { id: 'mega', name: 'Mega Compilation', status: 'pending', progress: 0, type: 'mega' }
-                ]
+        const arcPromises = microTopics.map((topic, i) => arcLimit(async () => {
+            const arcId = i + 1;
+            const arcOutputDir = path.join(outputDir, `Arc_${arcId}`);
+            if (!fs.existsSync(arcOutputDir)) fs.mkdirSync(arcOutputDir, { recursive: true });
+
+            let checkpointPassed = false, checkpointRetries = 0, checkpointFeedback = null;
+            let topicResult = { ...finalResult, ...topic, modules: [] };
+
+            // 1. Script Generation for this Arc
+            while (!checkpointPassed && checkpointRetries < 3) {
+                checkpointRetries++;
+                try {
+                    const targetArcWords = word_count || nicheProfile.pipeline_settings?.target_words_per_block || 1500;
+                    const planData = await modulePlanner.planModules(projectId, topicResult, checkpointFeedback?.feedback, niche, targetArcWords, 'LEGO_MICRO');
+                    topicResult = { ...topicResult, ...planData };
+                    const checkpointResult = await checkpointEngine.evaluatePlan(projectId, topicResult, niche, arcOutputDir, targetArcWords, 'LEGO_MICRO');
+                    if (checkpointResult && checkpointResult.ready) checkpointPassed = true;
+                    else checkpointFeedback = checkpointResult;
+                } catch (e) { if (checkpointRetries === 3) throw e; await sleep(2000); }
+            }
+            const scriptData = await scriptGenerator.processAllModules(projectId, topicResult, niche, targetLanguage, arcOutputDir);
+            const assembledData = await scriptAssembler.assembleScript(projectId, { ...topicResult, ...scriptData }, niche, targetLanguage);
+
+            // 2. Voice & SRT Generation for this Arc (Standalone)
+            log.info(`🎤 [LEGO] Đang tạo Voice cho Arc ${arcId}...`);
+            const voiceData = await pipeline.executeFullPipeline({
+                chapters: assembledData.modules_data, profileId, projectId, niche,
+                unified_voice: true, voice_service, voice_id: finalResult.voice_id, output_dir: arcOutputDir,
+                skip_media_gen: true // Chỉ gen Voice/SRT trước
             });
-        }
 
-        microTopics = await microTopicGenerator.generateMicroTopics(projectId, finalResult.core_keyword, finalResult.dominant_trigger, niche);
-    }
+            // 3. Skeleton Visual Prompts from SRT
+            log.info(`🖼️ [LEGO] Đang phân tích Skeleton Prompt cho Arc ${arcId}...`);
+            const visualSpecs = pipeline.calculateVisualSpecs(voiceData.duration, nicheProfile.pipeline_settings?.scene_duration || 8, voiceData.srt_path, '1:1', 'text', null, nicheProfile);
 
-    // Nếu có microTopics, chúng ta sẽ chạy generation cho từng topic (hiện tại đơn giản hóa là gộp meta)
-    // Trong tương lai, có thể lặp qua từng topic để tạo 3 bộ script/audio riêng biệt.
-    // Hiện tại: Module Planner sẽ được báo là có microTopics để nó lên kế hoạch 3 blocks.
+            // Parallelism check: generateVisualPrompts uses model rotation and batching internally
+            const visualPrompts = await pipeline.generateVisualPrompts(visualSpecs.scenes, { visual_style: nicheProfile.visual_style, visual_rules: nicheProfile.visual_rules, mapping_mode: '1:1' }, "Visual Narrative", `Arc_${arcId}`, projectId, arcOutputDir, true);
 
-    let checkpointPassed = false;
-    let checkpointRetries = 0;
-    let checkpointFeedback = null;
+            return {
+                id: arcId,
+                title: topic.topic_title,
+                audio_path: voiceData.audio_path,
+                srt_path: voiceData.srt_path,
+                duration: voiceData.duration,
+                visual_prompts: visualPrompts,
+                modules: assembledData.modules_data
+            };
+        }));
 
-    while (!checkpointPassed && checkpointRetries < 3) {
-        checkpointRetries++;
-        try {
-            if (!checkpointFeedback || checkpointFeedback.recommendation === 'adjust_keywords') {
-                const keywordData = await keywordEngine.processKeywords(projectId, finalResult, profileId, checkpointFeedback?.feedback, niche, targetLanguage);
-                finalResult = { ...finalResult, ...keywordData };
-            }
+        const arcResults = await Promise.all(arcPromises);
+        finalResult.legoBlocks = arcResults;
+        finalResult.isLego = true;
 
-            if (!checkpointPassed && (!checkpointFeedback || checkpointFeedback.recommendation === 'replan_modules' || checkpointFeedback.recommendation === 'adjust_keywords')) {
-                // Pass microTopics to planner if available
-                const planData = await modulePlanner.planModules(projectId, { ...finalResult, micro_topics: microTopics }, checkpointFeedback?.feedback, niche, word_count);
+        // Mega Compilation (Optional summary)
+        const megaRes = await compilationAssembler.assembleMegaVideo(projectId, arcResults, niche, outputDir);
+        return { ...finalResult, mega: { ...megaRes } };
+
+    } else {
+        // Standard SHU Mode
+        let checkpointPassed = false, checkpointRetries = 0, checkpointFeedback = null;
+        const targetWords = nicheProfile.pipeline_settings?.target_words_per_block || word_count || 4000;
+
+        while (!checkpointPassed && checkpointRetries < 3) {
+            checkpointRetries++;
+            try {
+                if (!checkpointFeedback || checkpointFeedback.recommendation === 'adjust_keywords') {
+                    const kwData = await keywordEngine.processKeywords(projectId, finalResult, profileId, checkpointFeedback?.feedback, niche, targetLanguage);
+                    finalResult = { ...finalResult, ...kwData };
+                }
+                const planData = await modulePlanner.planModules(projectId, finalResult, checkpointFeedback?.feedback, niche, targetWords, 'SHU');
                 finalResult = { ...finalResult, ...planData };
-            }
-
-            const checkpointResult = await checkpointEngine.evaluatePlan(projectId, finalResult, niche, outputDir, word_count);
-            if (checkpointResult && checkpointResult.ready) {
-                checkpointPassed = true;
-            } else {
-                checkpointFeedback = checkpointResult;
-            }
-        } catch (loopErr) {
-            log.error(`⚠️ Lỗi Pipeline: ${loopErr.message}`);
-            if (checkpointRetries === 3) throw loopErr;
-            await new Promise(r => setTimeout(r, 2000));
+                const checkpointResult = await checkpointEngine.evaluatePlan(projectId, finalResult, niche, outputDir, targetWords, 'SHU');
+                if (checkpointResult && checkpointResult.ready) checkpointPassed = true;
+                else checkpointFeedback = checkpointResult;
+            } catch (e) { if (checkpointRetries === 3) throw e; await sleep(2000); }
         }
-    }
-
-    // Generator Steps
-    try {
-        const scriptData = await scriptGenerator.processAllModules(projectId, finalResult, niche, targetLanguage);
+        const scriptData = await scriptGenerator.processAllModules(projectId, finalResult, niche, targetLanguage, outputDir);
         finalResult = { ...finalResult, ...scriptData };
-
         const assemblyData = await scriptAssembler.assembleScript(projectId, finalResult, niche, targetLanguage);
         finalResult = { ...finalResult, ...assemblyData };
 
         const ctrData = await ctrEngine.generateCTRBundle(projectId, finalResult.full_script, niche, targetLanguage);
         finalResult = { ...finalResult, ...ctrData };
 
-        const descData = await descriptionEngine.generateDescriptionBundle(projectId, finalResult, niche, targetLanguage);
-        finalResult = { ...finalResult, description_bundle: descData };
-
-        // --- STEP 7: AUTO-PILOT TO VIDEO (VOICE & ASSETS) ---
-        log.info("🚁 [SHU Pipeline] Đang tạo Voice & Assets cho kịch bản...");
         const pipelineData = await pipeline.executeFullPipeline({
-            chapters: finalResult.modules || [],
-            profileId: profileId,
-            projectId: projectId,
-            niche: niche,
-            unified_voice: true,
-            voice_service: 'ai84',
-            output_dir: outputDir
+            chapters: finalResult.modules, profileId, projectId, niche,
+            unified_voice: true, voice_service, voice_id: finalResult.voice_id, output_dir: outputDir
         });
-
-        // Merge results
-        finalResult = { ...finalResult, ...pipelineData };
-
-        // --- STEP 8: LEGO FINAL ASSEMBLY (Compilation) ---
-        if (legoMode && niche === 'dark_psychology_de') {
-            log.info("🧩 [LEGO Final] Đang ghép nối 3 micro-outputs thành Mega-Video...");
-
-            // SSE: Update Mega in Queue
-            if (global.sendSSE) {
-                global.sendSSE('queue_update', {
-                    isLego: true,
-                    items: [
-                        { id: 'block_1', name: 'Micro Clip 1', status: 'completed', progress: 100, type: 'micro' },
-                        { id: 'block_2', name: 'Micro Clip 2', status: 'completed', progress: 100, type: 'micro' },
-                        { id: 'block_3', name: 'Micro Clip 3', status: 'completed', progress: 100, type: 'micro' },
-                        { id: 'mega', name: 'Mega Compilation', status: 'processing', progress: 50, type: 'mega' }
-                    ]
-                });
-            }
-
-            const megaResult = await compilationAssembler.assembleMegaVideo(projectId, finalResult.modules || [], niche, outputDir);
-
-            // SSE: Finish Mega
-            if (global.sendSSE) {
-                global.sendSSE('queue_update', {
-                    isLego: true,
-                    items: [
-                        { id: 'block_1', name: 'Micro Clip 1', status: 'completed', progress: 100, type: 'micro' },
-                        { id: 'block_2', name: 'Micro Clip 2', status: 'completed', progress: 100, type: 'micro' },
-                        { id: 'block_3', name: 'Micro Clip 3', status: 'completed', progress: 100, type: 'micro' },
-                        { id: 'mega', name: 'Mega Compilation', status: 'completed', progress: 100, type: 'mega' }
-                    ]
-                });
-            }
-
-            // Build 3 Separate Block Results with REAL AI METADATA
-            log.info("🤖 [LEGO Hub] Đang tạo Metadata & Scroring riêng biệt cho 3 Micro-Topics...");
-            const legoBlocks = [];
-            const modules = finalResult.modules || [];
-            const blockSize = Math.ceil(modules.length / 3);
-
-            for (let i = 0; i < 3; i++) {
-                const blockModules = modules.slice(i * blockSize, (i + 1) * blockSize);
-                const blockScript = blockModules.map(m => m.script).join('\n\n');
-                const topic = microTopics[i] || { topic_title: `Micro Topic ${i + 1}`, core_question: "Unknown" };
-
-                // Generate Specific Metadata for this Block via AI
-                const blockMetaPrompt = `
-You are a YouTube SEO Expert for the German market (Style: Mr No Plan A).
-Given this script snippet, generate catchy viral titles, a deep psychological description, and relevant tags.
-Also evaluate the hook score (1-10) for this specific segment.
-
-TOPIC: ${topic.topic_title}
-MECHANISM: ${topic.named_mechanism || "Psychological manipulation"}
-SCRIPT:
-${blockScript.substring(0, 3000)}
-
-OUTPUT JSON ONLY:
-{
-  "hook_score": 0.0,
-  "titles": ["Title 1", "Title 2"],
-  "description": "...",
-  "tags": ["tag1", "tag2"],
-  "thumbnail": "Visual concept for thumbnail"
-}
-`;
-                let blockData = { hook_score: 7.0, titles: [`${topic.topic_title}`], description: `Deep dive into ${topic.named_mechanism}`, tags: ["psychology", "analysis"], thumbnail: "N/A" };
-                try {
-                    const blockRes = await audioKeyManager.executeWithRotation(async (apiKey) => {
-                        const genAI = new GoogleGenerativeAI(apiKey);
-                        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-lite' });
-                        const res = await model.generateContent(blockMetaPrompt);
-                        return parseAIResponse(res.response.text());
-                    });
-                    if (blockRes) blockData = blockRes;
-                } catch (e) { log.warn(`⚠️ Lỗi tạo metadata cho block ${i + 1}: ${e.message}`); }
-
-                legoBlocks.push({
-                    id: i + 1,
-                    full_script: blockScript,
-                    ...blockData,
-                    modules: blockModules
-                });
-            }
-
-            return {
-                ...finalResult,
-                isLego: true,
-                legoBlocks: legoBlocks,
-                mega: {
-                    ...finalResult,
-                    ...megaResult,
-                    full_script: finalResult.full_script,
-                    titles: finalResult.titles || [],
-                    metadata: finalResult.description_bundle
-                }
-            };
-        }
-
-    } catch (genErr) {
-        log.error(`❌ Lỗi Generator Step: ${genErr.message}`);
+        return { ...finalResult, ...pipelineData };
     }
-
-    return finalResult;
 }
 
-const { parseAIJSON } = require('./json_helper');
 function parseAIResponse(text) {
     const results = parseAIJSON(text, "Analysis");
     if (!results) return null;
-    return results.length === 1 ? results[0] : results;
+    return Array.isArray(results) ? results[0] : results;
 }
+
+function getAudioMimeType(ext) {
+    if (!ext) return 'audio/mpeg';
+    const map = {
+        '.mp3': 'audio/mpeg',
+        '.wav': 'audio/wav',
+        '.m4a': 'audio/mp4',
+        '.ogg': 'audio/ogg',
+        '.webm': 'audio/webm',
+        '.opus': 'audio/opus'
+    };
+    return map[ext.toLowerCase()] || 'audio/mpeg';
+}
+
+async function waitForFilesActive(fileManager, files) {
+    for (const file of files) {
+        let currentFile = await fileManager.getFile(file.name);
+        while (currentFile.state === "PROCESSING") {
+            await sleep(2000);
+            currentFile = await fileManager.getFile(file.name);
+        }
+    }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 module.exports = { analyzeContent };
