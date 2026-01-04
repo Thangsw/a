@@ -13,6 +13,22 @@ pydub==0.25.1
 # Optional: Piper TTS for offline generation
 # piper-tts==1.2.0
 
-# Optional: Coqui XTTS v2 for high-quality voice cloning
+# ============================================================
+# VOICE CLONING - Optional (chỉ cần nếu muốn clone custom voice)
+# ============================================================
+# Coqui XTTS v2 - Clone ANY voice from 6s audio sample
+# Uncomment nếu muốn dùng voice cloning:
+
 # TTS==0.21.0
-# torch==2.1.0  # For XTTS GPU acceleration
+# torch==2.1.0
+# torchaudio==2.1.0
+
+# NOTE: XTTS requirements:
+# - GPU: 4-5GB VRAM (GTX 1060 OK nhưng tight)
+# - Disk: ~4GB (model + PyTorch)
+# - Speed: 0.3-0.5x realtime (CHẬM hơn Edge-TTS nhiều)
+# - Quality: 10/10 (best quality, emotion preservation)
+#
+# Install commands:
+# pip install TTS==0.21.0
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
