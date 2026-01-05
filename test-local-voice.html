@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Local Voice - Edge TTS vs XTTS v2</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            text-align: center;
+            color: rgba(255,255,255,0.9);
+            margin-bottom: 30px;
+            font-size: 1.2em;
+        }
+
+        .compare-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .engine-card {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .engine-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid;
+        }
+
+        .engine-card.edge .engine-header {
+            border-color: #0078d4;
+        }
+
+        .engine-card.xtts .engine-header {
+            border-color: #28a745;
+        }
+
+        .engine-title {
+            font-size: 1.8em;
+            font-weight: bold;
+        }
+
+        .engine-card.edge .engine-title {
+            color: #0078d4;
+        }
+
+        .engine-card.xtts .engine-title {
+            color: #28a745;
+        }
+
+        .badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            color: white;
+        }
+
+        .badge.speed {
+            background: #ff6b6b;
+        }
+
+        .badge.quality {
+            background: #28a745;
+        }
+
+        .specs {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .spec-item {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            font-size: 0.95em;
+        }
+
+        .spec-label {
+            color: #666;
+            font-weight: 600;
+        }
+
+        .spec-value {
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        input[type="text"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        input:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        textarea {
+            min-height: 100px;
+            resize: vertical;
+            font-family: inherit;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+        }
+
+        .btn-edge {
+            background: #0078d4;
+            color: white;
+        }
+
+        .btn-edge:hover:not(:disabled) {
+            background: #006bb3;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 120, 212, 0.3);
+        }
+
+        .btn-xtts {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-xtts:hover:not(:disabled) {
+            background: #218838;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 15px 0;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .audio-player {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .audio-player h4 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        audio {
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .audio-info {
+            font-size: 13px;
+            color: #666;
+            margin-top: 10px;
+        }
+
+        .shared-input {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+        }
+
+        .shared-input h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        @media (max-width: 1024px) {
+            .compare-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .pro-con {
+            margin-top: 15px;
+        }
+
+        .pro-con h4 {
+            margin-bottom: 10px;
+            font-size: 1em;
+        }
+
+        .pro-con ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .pro-con li {
+            padding: 5px 0;
+            font-size: 0.9em;
+        }
+
+        .pro-con li::before {
+            margin-right: 8px;
+        }
+
+        .pros li::before {
+            content: "✅";
+        }
+
+        .cons li::before {
+            content: "❌";
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Local Voice Test Tool</h1>
+        <p class="subtitle">So sánh Edge-TTS vs XTTS v2 cho tiếng Đức</p>
+
+        <!-- Shared Input -->
+        <div class="shared-input">
+            <h2>📝 Nội dung test (tiếng Đức)</h2>
+            <div class="form-group">
+                <label for="textInput">Text cần chuyển thành giọng nói</label>
+                <textarea id="textInput" placeholder="Nhập văn bản tiếng Đức...">Hallo, das ist ein Test der Sprachsynthese. Ich bin ein virtueller Assistent und kann Ihnen bei verschiedenen Aufgaben helfen. Die Qualität der Stimme ist sehr wichtig für eine gute Benutzererfahrung.</textarea>
+                <p class="help-text">Văn bản này sẽ được sử dụng cho cả 2 engine</p>
+            </div>
+        </div>
+
+        <!-- Compare Grid -->
+        <div class="compare-grid">
+            <!-- Edge-TTS Card -->
+            <div class="engine-card edge">
+                <div class="engine-header">
+                    <div class="engine-title">⚡ Edge-TTS</div>
+                    <span class="badge speed">NHANH</span>
+                </div>
+
+                <div class="specs">
+                    <div class="spec-item">
+                        <span class="spec-label">Speed:</span>
+                        <span class="spec-value">5-10 giây ⚡⚡⚡⚡⚡</span>
+                    </div>
+                    <div class="spec-item">
+                        <span class="spec-label">Quality:</span>
+                        <span class="spec-value">9.5/10 ⭐</span>
+                    </div>
+                    <div class="spec-item">
+                        <span class="spec-label">VRAM:</span>
+                        <span class="spec-value">0 GB (Cloud)</span>
+                    </div>
+                    <div class="spec-item">
+                        <span class="spec-label">Voice Clone:</span>
+                        <span class="spec-value">❌ Không</span>
+                    </div>
+                </div>
+
+                <div class="pro-con">
+                    <div class="pros">
+                        <h4>Ưu điểm:</h4>
+                        <ul>
+                            <li>Cực nhanh (5-10s)</li>
+                            <li>400+ giọng có sẵn</li>
+                            <li>Miễn phí, không tốn GPU</li>
+                            <li>Production ready</li>
+                        </ul>
+                    </div>
+                    <div class="cons">
+                        <h4>Nhược điểm:</h4>
+                        <ul>
+                            <li>Không clone được giọng</li>
+                            <li>Cần internet</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="edgeVoice">Giọng Edge-TTS</label>
+                    <select id="edgeVoice">
+                        <option value="de-DE-ConradNeural">de-DE-ConradNeural (Nam - Authoritative)</option>
+                        <option value="de-DE-KatjaNeural">de-DE-KatjaNeural (Nữ - Warm)</option>
+                        <option value="de-DE-AmalaNeural">de-DE-AmalaNeural (Nữ - Energetic)</option>
+                        <option value="de-DE-KillianNeural">de-DE-KillianNeural (Nam - Young)</option>
+                    </select>
+                </div>
+
+                <button class="btn-edge" onclick="testEdgeTTS()" id="btnEdge">
+                    ⚡ Test Edge-TTS
+                </button>
+
+                <div class="loading" id="loadingEdge">
+                    <div class="spinner"></div>
+                    <p>Đang tạo voice với Edge-TTS...</p>
+                </div>
+
+                <div class="status" id="statusEdge"></div>
+
+                <div class="audio-player" id="playerEdge">
+                    <h4>🔊 Kết quả Edge-TTS</h4>
+                    <audio controls id="audioEdge"></audio>
+                    <div class="audio-info" id="infoEdge"></div>
+                </div>
+            </div>
+
+            <!-- XTTS v2 Card -->
+            <div class="engine-card xtts">
+                <div class="engine-header">
+                    <div class="engine-title">🎨 XTTS v2</div>
+                    <span class="badge quality">QUALITY</span>
+                </div>
+
+                <div class="specs">
+                    <div class="spec-item">
+                        <span class="spec-label">Speed:</span>
+                        <span class="spec-value">20-30 phút ⚡⚡</span>
+                    </div>
+                    <div class="spec-item">
+                        <span class="spec-label">Quality:</span>
+                        <span class="spec-value">10/10 ⭐⭐</span>
+                    </div>
+                    <div class="spec-item">
+                        <span class="spec-label">VRAM:</span>
+                        <span class="spec-value">4-5 GB</span>
+                    </div>
+                    <div class="spec-item">
+                        <span class="spec-label">Voice Clone:</span>
+                        <span class="spec-value">✅ Có (6s audio)</span>
+                    </div>
+                </div>
+
+                <div class="pro-con">
+                    <div class="pros">
+                        <h4>Ưu điểm:</h4>
+                        <ul>
+                            <li>Quality 10/10 - Tự nhiên nhất</li>
+                            <li>Clone bất kỳ giọng nào</li>
+                            <li>Giữ emotion, intonation</li>
+                            <li>Offline (sau khi tải model)</li>
+                        </ul>
+                    </div>
+                    <div class="cons">
+                        <h4>Nhược điểm:</h4>
+                        <ul>
+                            <li>Chậm (20-30 phút)</li>
+                            <li>Cần GPU 4-5GB VRAM</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="xttsReference">Reference Audio (6-10s tiếng Đức)</label>
+                    <input type="file" id="xttsReference" accept="audio/*" style="padding: 8px;">
+                    <p class="help-text">Upload file audio mẫu 6-10 giây tiếng Đức để clone giọng</p>
+                </div>
+
+                <button class="btn-xtts" onclick="testXTTS()" id="btnXTTS">
+                    🎨 Test XTTS v2
+                </button>
+
+                <div class="loading" id="loadingXTTS">
+                    <div class="spinner"></div>
+                    <p>Đang tạo voice với XTTS v2... (có thể mất 20-30 phút)</p>
+                </div>
+
+                <div class="status" id="statusXTTS"></div>
+
+                <div class="audio-player" id="playerXTTS">
+                    <h4>🔊 Kết quả XTTS v2</h4>
+                    <audio controls id="audioXTTS"></audio>
+                    <div class="audio-info" id="infoXTTS"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Test Edge-TTS
+        async function testEdgeTTS() {
+            const text = document.getElementById('textInput').value.trim();
+            const voice = document.getElementById('edgeVoice').value;
+
+            if (!text) {
+                showStatus('statusEdge', 'Vui lòng nhập văn bản', 'error');
+                return;
+            }
+
+            const btnEdge = document.getElementById('btnEdge');
+            const loadingEdge = document.getElementById('loadingEdge');
+            const statusEdge = document.getElementById('statusEdge');
+            const playerEdge = document.getElementById('playerEdge');
+
+            try {
+                btnEdge.disabled = true;
+                loadingEdge.style.display = 'block';
+                statusEdge.style.display = 'none';
+                playerEdge.style.display = 'none';
+
+                const startTime = Date.now();
+
+                // Call backend API
+                const response = await fetch('/api/test-edge-tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        voice: voice,
+                        language: 'de'
+                    })
+                });
+
+                const result = await response.json();
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+                if (result.success && result.audio_path) {
+                    // Display audio
+                    const audioUrl = `/api/audio-proxy?path=${encodeURIComponent(result.audio_path)}`;
+                    document.getElementById('audioEdge').src = audioUrl;
+
+                    // Display info
+                    const info = `
+                        <strong>⏱️ Thời gian:</strong> ${elapsed}s<br>
+                        <strong>📊 Duration:</strong> ${result.duration ? result.duration.toFixed(1) + 's' : 'N/A'}<br>
+                        <strong>📁 File:</strong> ${result.audio_path.split(/[/\\]/).pop()}
+                    `;
+                    document.getElementById('infoEdge').innerHTML = info;
+
+                    playerEdge.style.display = 'block';
+                    showStatus('statusEdge', `✅ Tạo thành công trong ${elapsed}s!`, 'success');
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                showStatus('statusEdge', '❌ Lỗi: ' + error.message, 'error');
+            } finally {
+                btnEdge.disabled = false;
+                loadingEdge.style.display = 'none';
+            }
+        }
+
+        // Test XTTS v2
+        async function testXTTS() {
+            const text = document.getElementById('textInput').value.trim();
+            const referenceFile = document.getElementById('xttsReference').files[0];
+
+            if (!text) {
+                showStatus('statusXTTS', 'Vui lòng nhập văn bản', 'error');
+                return;
+            }
+
+            if (!referenceFile) {
+                showStatus('statusXTTS', 'Vui lòng upload reference audio (6-10s tiếng Đức)', 'error');
+                return;
+            }
+
+            const btnXTTS = document.getElementById('btnXTTS');
+            const loadingXTTS = document.getElementById('loadingXTTS');
+            const statusXTTS = document.getElementById('statusXTTS');
+            const playerXTTS = document.getElementById('playerXTTS');
+
+            try {
+                btnXTTS.disabled = true;
+                loadingXTTS.style.display = 'block';
+                statusXTTS.style.display = 'none';
+                playerXTTS.style.display = 'none';
+
+                const startTime = Date.now();
+
+                // Upload reference audio + generate
+                const formData = new FormData();
+                formData.append('text', text);
+                formData.append('reference', referenceFile);
+                formData.append('language', 'de');
+
+                const response = await fetch('/api/test-xtts', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+                if (result.success && result.audio_path) {
+                    // Display audio
+                    const audioUrl = `/api/audio-proxy?path=${encodeURIComponent(result.audio_path)}`;
+                    document.getElementById('audioXTTS').src = audioUrl;
+
+                    // Display info
+                    const info = `
+                        <strong>⏱️ Thời gian:</strong> ${elapsed}s (${(elapsed/60).toFixed(1)} phút)<br>
+                        <strong>📊 Duration:</strong> ${result.duration ? result.duration.toFixed(1) + 's' : 'N/A'}<br>
+                        <strong>📁 File:</strong> ${result.audio_path.split(/[/\\]/).pop()}
+                    `;
+                    document.getElementById('infoXTTS').innerHTML = info;
+
+                    playerXTTS.style.display = 'block';
+                    showStatus('statusXTTS', `✅ Tạo thành công trong ${(elapsed/60).toFixed(1)} phút!`, 'success');
+                } else {
+                    throw new Error(result.error || 'Unknown error');
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                showStatus('statusXTTS', '❌ Lỗi: ' + error.message, 'error');
+            } finally {
+                btnXTTS.disabled = false;
+                loadingXTTS.style.display = 'none';
+            }
+        }
+
+        // Helper: Show status
+        function showStatus(id, message, type) {
+            const el = document.getElementById(id);
+            el.textContent = message;
+            el.className = 'status ' + type;
+            el.style.display = 'block';
+        }
+    </script>
+</body>
+</html>
