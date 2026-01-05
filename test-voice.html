@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test Voice Generation - TTS</title>
+    <title>Test Voice Generation - TTS System</title>
     <style>
         * {
             margin: 0;
@@ -26,7 +26,7 @@
             border-radius: 20px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             padding: 40px;
-            max-width: 800px;
+            max-width: 900px;
             width: 100%;
         }
 
@@ -49,12 +49,28 @@
             padding: 20px;
             border-radius: 10px;
             margin-bottom: 30px;
+            border-left: 4px solid #667eea;
         }
 
         .config-section h2 {
             color: #667eea;
             margin-bottom: 15px;
             font-size: 1.3em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .config-status {
+            font-size: 0.8em;
+            padding: 5px 10px;
+            border-radius: 5px;
+            background: #28a745;
+            color: white;
+        }
+
+        .config-status.error {
+            background: #dc3545;
         }
 
         .form-group {
@@ -70,6 +86,7 @@
 
         input[type="text"],
         input[type="password"],
+        input[type="number"],
         select,
         textarea {
             width: 100%;
@@ -118,7 +135,7 @@
             color: white;
         }
 
-        .btn-primary:hover {
+        .btn-primary:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
         }
@@ -128,7 +145,7 @@
             color: white;
         }
 
-        .btn-secondary:hover {
+        .btn-secondary:hover:not(:disabled) {
             background: #5a6268;
             transform: translateY(-2px);
         }
@@ -138,7 +155,7 @@
             color: white;
         }
 
-        .btn-success:hover {
+        .btn-success:hover:not(:disabled) {
             background: #218838;
             transform: translateY(-2px);
         }
@@ -155,6 +172,18 @@
             border-radius: 8px;
             font-weight: 500;
             display: none;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .status.success {
@@ -181,6 +210,7 @@
             background: #f8f9fa;
             border-radius: 10px;
             display: none;
+            border-left: 4px solid #28a745;
         }
 
         .audio-player h3 {
@@ -191,6 +221,19 @@
         audio {
             width: 100%;
             margin-top: 10px;
+        }
+
+        .audio-info {
+            margin-top: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .audio-info div {
+            margin: 5px 0;
+            color: #666;
         }
 
         .loading {
@@ -219,33 +262,47 @@
             color: #888;
             margin-top: 5px;
         }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+
+        @media (max-width: 768px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🎙️ Voice Generator Test</h1>
-        <p class="subtitle">Test TTS (Text-to-Speech) với ElevenLabs API</p>
+        <p class="subtitle">Test TTS System qua Backend API</p>
 
         <!-- Config Section -->
         <div class="config-section">
-            <h2>⚙️ Cấu hình TTS</h2>
-            <div class="form-group">
-                <label for="apiKey">API Key (ElevenLabs)</label>
-                <input type="password" id="apiKey" placeholder="Nhập ElevenLabs API Key">
-                <p class="help-text">Lấy API key từ https://elevenlabs.io/app/settings</p>
+            <h2>
+                ⚙️ Cấu hình TTS
+                <span class="config-status" id="configStatus">Chưa load</span>
+            </h2>
+            <div class="grid-2">
+                <div class="form-group">
+                    <label for="apiKey">API Key</label>
+                    <input type="password" id="apiKey" placeholder="Nhập TTS API Key">
+                    <p class="help-text">API key cho TTS service (ElevenLabs, Google TTS, v.v.)</p>
+                </div>
+                <div class="form-group">
+                    <label for="voiceId">Voice ID</label>
+                    <input type="text" id="voiceId" placeholder="Nhập Voice ID">
+                    <p class="help-text">ID của giọng nói cần sử dụng</p>
+                </div>
             </div>
             <div class="form-group">
-                <label for="voiceId">Voice ID</label>
-                <input type="text" id="voiceId" placeholder="Nhập Voice ID">
-                <p class="help-text">Tìm Voice ID tại https://elevenlabs.io/app/voice-library</p>
-            </div>
-            <div class="form-group">
-                <label for="modelId">Model</label>
-                <select id="modelId">
-                    <option value="eleven_multilingual_v2">Eleven Multilingual v2</option>
-                    <option value="eleven_monolingual_v1">Eleven Monolingual v1</option>
-                    <option value="eleven_turbo_v2">Eleven Turbo v2 (Fast)</option>
-                </select>
+                <label for="modelId">Model ID</label>
+                <input type="text" id="modelId" placeholder="e.g., eleven_multilingual_v2">
+                <p class="help-text">Model ID của TTS service</p>
             </div>
             <div class="button-group">
                 <button class="btn-secondary" onclick="loadConfig()">📥 Tải Config</button>
@@ -253,16 +310,23 @@
             </div>
         </div>
 
-        <!-- Text Input Section -->
-        <div class="form-group">
-            <label for="textInput">Nội dung cần chuyển thành giọng nói</label>
-            <textarea id="textInput" placeholder="Nhập văn bản cần chuyển thành giọng nói...">Xin chào, đây là bài test tạo giọng nói bằng ElevenLabs API. Chúc bạn một ngày tốt lành!</textarea>
-        </div>
-
-        <div class="button-group">
-            <button class="btn-primary" onclick="generateVoice()" id="generateBtn">
-                🎤 Tạo Voice
-            </button>
+        <!-- Test Section -->
+        <div class="config-section" style="border-left-color: #28a745;">
+            <h2>🎤 Test Voice Generation</h2>
+            <div class="form-group">
+                <label for="chapterId">Chapter ID (tùy chọn)</label>
+                <input type="number" id="chapterId" value="1" placeholder="1">
+                <p class="help-text">ID của chapter để test (mặc định: 1)</p>
+            </div>
+            <div class="form-group">
+                <label for="textInput">Nội dung cần chuyển thành giọng nói</label>
+                <textarea id="textInput" placeholder="Nhập văn bản cần chuyển thành giọng nói...">Xin chào, đây là bài test tạo giọng nói thông qua hệ thống TTS backend. Hệ thống này hỗ trợ nhiều TTS service khác nhau. Chúc bạn một ngày tốt lành!</textarea>
+            </div>
+            <div class="button-group">
+                <button class="btn-primary" onclick="generateVoice()" id="generateBtn">
+                    🎤 Tạo Voice
+                </button>
+            </div>
         </div>
 
         <!-- Loading -->
@@ -278,6 +342,7 @@
         <div class="audio-player" id="audioPlayer">
             <h3>🔊 Kết quả</h3>
             <audio controls id="audioElement"></audio>
+            <div class="audio-info" id="audioInfo"></div>
             <button class="btn-secondary" onclick="downloadAudio()" style="margin-top: 15px; width: 100%;">
                 ⬇️ Tải xuống
             </button>
@@ -285,7 +350,8 @@
     </div>
 
     <script>
-        let currentAudioUrl = null;
+        let currentAudioPath = null;
+        let currentAudioData = null;
 
         // Load config from backend
         async function loadConfig() {
@@ -294,16 +360,26 @@
                 const response = await fetch('/api/tts-config');
                 const data = await response.json();
 
-                if (data.success !== false) {
-                    document.getElementById('apiKey').value = data.api_key || '';
-                    document.getElementById('voiceId').value = data.voice_id || '';
-                    document.getElementById('modelId').value = data.model_id || 'eleven_multilingual_v2';
+                if (data.success && data.config) {
+                    const config = data.config;
+
+                    // Note: API key is masked on backend, only show if has key
+                    if (config.has_key) {
+                        document.getElementById('apiKey').placeholder = `API Key đã lưu (...${config.api_key_masked || '****'})`;
+                    }
+
+                    document.getElementById('voiceId').value = config.voice_id || '';
+                    document.getElementById('modelId').value = config.model_id || 'eleven_multilingual_v2';
+
                     showStatus('✅ Đã tải cấu hình thành công!', 'success');
+                    updateConfigStatus(true);
                 } else {
                     showStatus('⚠️ Không tìm thấy cấu hình. Vui lòng nhập và lưu.', 'info');
+                    updateConfigStatus(false);
                 }
             } catch (error) {
                 showStatus('❌ Lỗi khi tải config: ' + error.message, 'error');
+                updateConfigStatus(false);
             }
         }
 
@@ -311,49 +387,51 @@
         async function saveConfig() {
             const apiKey = document.getElementById('apiKey').value.trim();
             const voiceId = document.getElementById('voiceId').value.trim();
-            const modelId = document.getElementById('modelId').value;
+            const modelId = document.getElementById('modelId').value.trim();
 
-            if (!apiKey || !voiceId) {
-                showStatus('⚠️ Vui lòng nhập đầy đủ API Key và Voice ID', 'error');
+            if (!voiceId) {
+                showStatus('⚠️ Vui lòng nhập Voice ID', 'error');
                 return;
             }
 
             try {
                 showStatus('Đang lưu cấu hình...', 'info');
+                const body = { voice_id: voiceId, model_id: modelId };
+
+                // Only send API key if user entered a new one
+                if (apiKey) {
+                    body.api_key = apiKey;
+                }
+
                 const response = await fetch('/api/tts-config', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        api_key: apiKey,
-                        voice_id: voiceId,
-                        model_id: modelId
-                    })
+                    body: JSON.stringify(body)
                 });
 
                 const data = await response.json();
                 if (data.success) {
                     showStatus('✅ Đã lưu cấu hình thành công!', 'success');
+                    updateConfigStatus(true);
+                    // Reload to get masked key
+                    setTimeout(loadConfig, 500);
                 } else {
                     showStatus('❌ Lỗi: ' + (data.error || 'Unknown error'), 'error');
+                    updateConfigStatus(false);
                 }
             } catch (error) {
                 showStatus('❌ Lỗi khi lưu config: ' + error.message, 'error');
+                updateConfigStatus(false);
             }
         }
 
-        // Generate voice
+        // Generate voice via backend API
         async function generateVoice() {
             const text = document.getElementById('textInput').value.trim();
-            const apiKey = document.getElementById('apiKey').value.trim();
-            const voiceId = document.getElementById('voiceId').value.trim();
+            const chapterId = document.getElementById('chapterId').value || '1';
 
             if (!text) {
                 showStatus('⚠️ Vui lòng nhập nội dung văn bản', 'error');
-                return;
-            }
-
-            if (!apiKey || !voiceId) {
-                showStatus('⚠️ Vui lòng cấu hình API Key và Voice ID trước', 'error');
                 return;
             }
 
@@ -366,39 +444,50 @@
                 hideStatus();
                 hideAudioPlayer();
 
-                // Call ElevenLabs API directly
-                const modelId = document.getElementById('modelId').value;
-                const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+                // Call backend API /api/retry-voice
+                const response = await fetch('/api/retry-voice', {
                     method: 'POST',
-                    headers: {
-                        'Accept': 'audio/mpeg',
-                        'Content-Type': 'application/json',
-                        'xi-api-key': apiKey
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         text: text,
-                        model_id: modelId,
-                        voice_settings: {
-                            stability: 0.5,
-                            similarity_boost: 0.75
-                        }
+                        chapterId: chapterId,
+                        outputDir: 'output_files'
                     })
                 });
 
-                if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`API Error: ${response.status} - ${errorText}`);
+                const result = await response.json();
+
+                if (result.success && result.data) {
+                    const data = result.data;
+                    currentAudioData = data;
+
+                    // Display audio player
+                    if (data.audio_path) {
+                        currentAudioPath = data.audio_path;
+                        const audioUrl = `/api/audio-proxy?path=${encodeURIComponent(data.audio_path)}`;
+                        const audioElement = document.getElementById('audioElement');
+                        audioElement.src = audioUrl;
+
+                        // Display info
+                        let infoHtml = `
+                            <div><strong>Audio:</strong> ${data.audio_path.split(/[/\\]/).pop()}</div>
+                            <div><strong>Duration:</strong> ${data.duration ? data.duration.toFixed(2) + 's' : 'N/A'}</div>
+                        `;
+
+                        if (data.srt_path) {
+                            infoHtml += `<div><strong>SRT:</strong> ${data.srt_path.split(/[/\\]/).pop()}</div>`;
+                        }
+
+                        document.getElementById('audioInfo').innerHTML = infoHtml;
+                        document.getElementById('audioPlayer').style.display = 'block';
+
+                        showStatus('✅ Tạo voice thành công!', 'success');
+                    } else {
+                        throw new Error('Không nhận được audio path từ server');
+                    }
+                } else {
+                    throw new Error(result.error || 'Unknown error from server');
                 }
-
-                const audioBlob = await response.blob();
-                currentAudioUrl = URL.createObjectURL(audioBlob);
-
-                // Display audio player
-                const audioElement = document.getElementById('audioElement');
-                audioElement.src = currentAudioUrl;
-                document.getElementById('audioPlayer').style.display = 'block';
-
-                showStatus('✅ Tạo voice thành công!', 'success');
 
             } catch (error) {
                 console.error('Error:', error);
@@ -410,12 +499,36 @@
         }
 
         // Download audio
-        function downloadAudio() {
-            if (currentAudioUrl) {
-                const a = document.createElement('a');
-                a.href = currentAudioUrl;
-                a.download = 'voice_' + Date.now() + '.mp3';
-                a.click();
+        async function downloadAudio() {
+            if (currentAudioPath) {
+                try {
+                    const audioUrl = `/api/audio-proxy?path=${encodeURIComponent(currentAudioPath)}`;
+                    const response = await fetch(audioUrl);
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = currentAudioPath.split(/[/\\]/).pop() || 'voice.mp3';
+                    a.click();
+
+                    URL.revokeObjectURL(url);
+                    showStatus('✅ Đã tải xuống file!', 'success');
+                } catch (error) {
+                    showStatus('❌ Lỗi khi tải file: ' + error.message, 'error');
+                }
+            }
+        }
+
+        // Update config status badge
+        function updateConfigStatus(isConfigured) {
+            const statusEl = document.getElementById('configStatus');
+            if (isConfigured) {
+                statusEl.textContent = 'Đã cấu hình';
+                statusEl.className = 'config-status';
+            } else {
+                statusEl.textContent = 'Chưa cấu hình';
+                statusEl.className = 'config-status error';
             }
         }
 
